@@ -1,0 +1,221 @@
+// ==UserScript==
+// @name         YouTube Mass Block (BlockTube Helper) - Hover Button
+// @namespace    yt-mass-block
+// @version      1.4
+// @description  Hover a video -> red button at top-left to block it. 'b' = block hovered card, 'Shift + B' = bulk block.
+// @match        https://www.youtube.com/*
+// @grant        none
+// ==/UserScript==
+
+(function () {
+  'use strict';
+
+  const DEBUG = true;
+  function log(...args) {
+    if (DEBUG) console.log('%c[YT-BLOCK]', 'color:#fff;background:#cc0000;padding:2px 6px;border-radius:3px;font-weight:bold', ...args);
+  }
+
+  // ---------- SELECTORS & PATTERNS ----------
+  const BLOCK_PATTERNS = [
+    /block video/i,
+    /don'?t recommend channel/i,
+    /not interested/i
+  ];
+
+  const CARD_SELECTOR = [
+    'ytd-rich-item-renderer',
+    'ytd-video-renderer',
+    'ytd-grid-video-renderer',
+    'ytd-compact-video-renderer'
+  ].join(', ');
+
+  const MENU_BTN_SELECTORS = [
+    '#menu ytd-menu-renderer yt-icon-button#button',
+    '#menu ytd-menu-renderer button',
+    'button[aria-label*="Action" i]',
+    'yt-icon-button#button'
+  ];
+
+  let currentCard = null;
+
+  // ---------- HOVER BLOCK BUTTON ----------
+  const blockBtn = document.createElement('div');
+  blockBtn.textContent = '🚫';
+  blockBtn.title = 'Block this video';
+  Object.assign(blockBtn.style, {
+    position: 'fixed',
+    zIndex: '2147483647',
+    display: 'none',
+    width: '28px',
+    height: '28px',
+    lineHeight: '28px',
+    textAlign: 'center',
+    fontSize: '16px',
+    cursor: 'pointer',
+    background: 'rgba(204,0,0,0.92)',
+    color: '#fff',
+    borderRadius: '6px',
+    boxShadow: '0 2px 6px rgba(0,0,0,0.5)',
+    userSelect: 'none'
+  });
+  let busy = false;
+  async function triggerBlock() {
+    if (busy || !currentCard) return;
+    busy = true;
+    const card = currentCard;
+    blockBtn.style.background = '#ff1a1a';
+    hideBtn();
+    try {
+      await blockCard(card);
+    } finally {
+      currentCard = null;
+      busy = false;
+      blockBtn.style.background = 'rgba(204,0,0,0.92)';
+    }
+  }
+  // Hovering the button blocks the video
+  blockBtn.addEventListener('mouseenter', triggerBlock);
+  // stop YouTube from starting a click/navigation underneath
+  ['mousedown', 'mouseup', 'pointerdown', 'pointerup'].forEach(ev =>
+    blockBtn.addEventListener(ev, (e) => { e.stopPropagation(); e.preventDefault(); }, true)
+  );
+  blockBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    triggerBlock();
+  }, true);
+  document.documentElement.appendChild(blockBtn);
+
+  function hideBtn() {
+    blockBtn.style.display = 'none';
+  }
+
+  function positionBtn(card) {
+    const anchor = card.querySelector('ytd-thumbnail, a#thumbnail') || card;
+    const r = anchor.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) return hideBtn();
+    blockBtn.style.left = (r.left + 6) + 'px';
+    blockBtn.style.top = (r.top + 6) + 'px';
+    blockBtn.style.display = 'block';
+  }
+
+  // Track hover accurately
+  document.addEventListener('mousemove', (e) => {
+    if (e.target === blockBtn) return; // keep current card while on the button
+
+    const card = e.target.closest ? e.target.closest(CARD_SELECTOR) : null;
+    if (card) {
+      if (card !== currentCard) {
+        currentCard = card;
+        const title = card.querySelector('#video-title, #video-title-link');
+        log('Hovered card:', title ? title.textContent.trim().slice(0, 50) : card.tagName);
+      }
+      positionBtn(card);
+    } else {
+      currentCard = null;
+      hideBtn();
+    }
+  }, { passive: true });
+
+  // Hide on scroll; next mouse move will bring it back in the right place
+  window.addEventListener('scroll', hideBtn, { passive: true });
+
+  // ---------- BLOCK LOGIC ----------
+  function findMenuButton(card) {
+    for (const sel of MENU_BTN_SELECTORS) {
+      const btn = card.querySelector(sel);
+      if (btn && btn.offsetParent !== null) return btn;
+    }
+    const menuRenderer = card.querySelector('ytd-menu-renderer');
+    if (menuRenderer) {
+      const btn = menuRenderer.querySelector('button');
+      if (btn) return btn;
+    }
+    return null;
+  }
+
+  function waitForMenuItems(timeout = 1000) {
+    return new Promise((resolve) => {
+      const startTime = Date.now();
+      const interval = setInterval(() => {
+        const items = Array.from(document.querySelectorAll('ytd-menu-service-item-renderer, tp-yt-paper-item, [role="menuitem"]'))
+          .filter(el => el.offsetParent !== null && (el.innerText || '').trim().length > 0);
+
+        if (items.length > 0 || Date.now() - startTime > timeout) {
+          clearInterval(interval);
+          resolve(items);
+        }
+      }, 50);
+    });
+  }
+
+  function closeMenu() {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+  }
+
+  async function blockCard(card) {
+    if (!card) return false;
+
+    const menuBtn = findMenuButton(card);
+    if (!menuBtn) {
+      log('Action menu button nahi mila is card par.');
+      return false;
+    }
+
+    menuBtn.click();
+
+    const items = await waitForMenuItems(1000);
+    const target = items.find(item => BLOCK_PATTERNS.some(pat => pat.test(item.innerText || '')));
+
+    if (target) {
+      log('Blocked:', target.innerText.trim());
+      target.click();
+      return true;
+    }
+
+    closeMenu();
+    return false;
+  }
+
+  // Hotkey: 'b' for hovered card
+  document.addEventListener('keydown', async (e) => {
+    const active = document.activeElement;
+    if (['INPUT', 'TEXTAREA'].includes(active?.tagName) || active?.isContentEditable) return;
+
+    if (e.key.toLowerCase() === 'b' && !e.shiftKey) {
+      if (!currentCard) {
+        log('Error: Kisi video card par cursor nahi hai.');
+        return;
+      }
+      await blockCard(currentCard);
+    }
+  });
+
+  // Hotkey: Shift + B for bulk block
+  async function bulkBlock() {
+    const cards = Array.from(document.querySelectorAll(CARD_SELECTOR))
+      .filter(c => c.offsetParent !== null);
+
+    log(`Starting bulk action on ${cards.length} cards...`);
+    let count = 0;
+
+    for (let i = 0; i < cards.length; i++) {
+      const card = cards[i];
+      if (!document.body.contains(card)) continue;
+
+      const ok = await blockCard(card);
+      if (ok) count++;
+      await new Promise(r => setTimeout(r, 600));
+    }
+    log(`Bulk action complete: ${count}/${cards.length} blocked.`);
+  }
+
+  document.addEventListener('keydown', (e) => {
+    const active = document.activeElement;
+    if (['INPUT', 'TEXTAREA'].includes(active?.tagName) || active?.isContentEditable) return;
+
+    if (e.key.toLowerCase() === 'b' && e.shiftKey) {
+      bulkBlock();
+    }
+  });
+})();
