@@ -1,0 +1,92 @@
+// ==UserScript==
+// @name         YouTube Resume (Modern SPA Fix)
+// @namespace    http://tampermonkey.net/
+// @version      2.0
+// @description  Reliably resumes YouTube videos, handling SPA navigation, ads, and memory leaks.
+// @match        *://*.youtube.com/*
+// @grant        GM_setValue
+// @grant        GM_getValue
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    let currentVideoId = null;
+    let videoElement = null;
+    let timeUpdateListener = null;
+    let lastSaveTime = 0;
+
+    // Pro-Trick: Extract ID directly from URL params. DOM changes won't break this.
+    function getVideoId() {
+        return new URLSearchParams(window.location.search).get('v');
+    }
+
+    function initTracker() {
+        const newVideoId = getVideoId();
+        if (!newVideoId) return; // Exit if not on a watch page
+
+        currentVideoId = newVideoId;
+
+        // Polling to wait for the actual video element to load in DOM
+        const checkExist = setInterval(() => {
+            videoElement = document.querySelector('video.html5-main-video');
+            const moviePlayer = document.getElementById('movie_player');
+
+            // Critical check: Ensure player is ready and it's NOT playing an ad
+            const isAd = moviePlayer && moviePlayer.classList.contains('ad-showing');
+
+            if (videoElement && videoElement.readyState > 0 && !isAd) {
+                clearInterval(checkExist);
+                setupVideoTracking();
+            }
+        }, 500);
+    }
+
+    function setupVideoTracking() {
+        // Fix Memory Leak: Remove old listener if it exists before adding a new one
+        if (timeUpdateListener) {
+            videoElement.removeEventListener('timeupdate', timeUpdateListener);
+        }
+
+        let savedTime = GM_getValue("p_" + currentVideoId, 0);
+        let duration = videoElement.duration;
+
+        // Resume Logic
+        if (savedTime > 0 && duration > 0) {
+            // Check Dealbreaker: Don't resume if we are in the last 5% of the video
+            if ((duration - savedTime) >= duration * 0.05) {
+                // Rewind 5 seconds for context, unless at the very start
+                let resumeTo = savedTime > 10 ? savedTime - 5 : savedTime;
+
+                // Only seek if the video is currently at the start
+                if (videoElement.currentTime < 2) {
+                    videoElement.currentTime = resumeTo;
+                }
+            }
+        }
+
+        // Save Logic (Event-Driven)
+        timeUpdateListener = () => {
+            const moviePlayer = document.getElementById('movie_player');
+            // Dealbreaker Filter: Stop saving immediately if an ad interrupts
+            if (moviePlayer && moviePlayer.classList.contains('ad-showing')) return;
+
+            const now = Date.now();
+            // Throttling: Save only every 2 seconds instead of every frame
+            if (now - lastSaveTime > 2000) {
+                GM_setValue("p_" + currentVideoId, videoElement.currentTime);
+                lastSaveTime = now;
+            }
+        };
+
+        videoElement.addEventListener('timeupdate', timeUpdateListener);
+    }
+
+    // SPA Navigation Fix: Listen to YouTube's native internal router event
+    window.addEventListener('yt-navigate-finish', () => {
+        initTracker();
+    });
+
+    // Fire on initial direct page load
+    initTracker();
+})();
