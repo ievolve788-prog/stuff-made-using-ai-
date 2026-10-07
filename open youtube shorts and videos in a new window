@@ -1,0 +1,92 @@
+// ==UserScript==
+// @name         YouTube New Window Opener (Shorts & Search Included)
+// @namespace    http://tampermonkey.net/
+// @version      1.2
+// @description  Open YouTube videos, searched videos, and shorts in a new floating window. Toggleable.
+// @author       You
+// @match        *://*.youtube.com/*
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @run-at       document-start
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    let isEnabled = GM_getValue('yt_new_window_enabled', true);
+
+    function createToggleButton() {
+        if (document.getElementById('yt-window-toggle')) return;
+
+        const btn = document.createElement('button');
+        btn.id = 'yt-window-toggle';
+        btn.innerHTML = isEnabled ? '🪟 New Window: ON' : '🪟 New Window: OFF';
+        btn.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            z-index: 999999;
+            padding: 8px 16px;
+            background: ${isEnabled ? '#cc0000' : '#272727'};
+            color: #fff;
+            border: 1px solid #333;
+            border-radius: 20px;
+            cursor: pointer;
+            font-family: "Roboto", Arial, sans-serif;
+            font-size: 13px;
+            font-weight: 500;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            transition: all 0.2s ease-in-out;
+        `;
+
+        btn.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            isEnabled = !isEnabled;
+            GM_setValue('yt_new_window_enabled', isEnabled);
+            btn.innerHTML = isEnabled ? '🪟 New Window: ON' : '🪟 New Window: OFF';
+            btn.style.background = isEnabled ? '#cc0000' : '#272727';
+        };
+
+        document.documentElement.appendChild(btn);
+    }
+
+    const observer = new MutationObserver(() => {
+        if (!document.getElementById('yt-window-toggle')) {
+            createToggleButton();
+        }
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+        createToggleButton();
+        observer.observe(document.body, { childList: true, subtree: true });
+    });
+
+    window.addEventListener('click', function(e) {
+        if (!isEnabled) return;
+        if (e.button !== 0 || e.ctrlKey || e.shiftKey || e.metaKey || e.altKey) return;
+
+        const a = e.target.closest('a');
+        if (!a || !a.href) return;
+
+        try {
+            const url = new URL(a.href);
+
+            // Ab yeh normal videos (/watch) aur Shorts (/shorts/) dono ko pakdega
+            if (url.hostname.includes('youtube.com') &&
+               (url.pathname === '/watch' || url.pathname.startsWith('/shorts/'))) {
+
+                e.preventDefault();
+                e.stopPropagation();
+
+                const width = 1000;
+                const height = 600;
+                const left = (screen.width / 2) - (width / 2);
+                const top = (screen.height / 2) - (height / 2);
+                const features = `width=${width},height=${height},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no`;
+
+                window.open(a.href, '_blank', features);
+            }
+        } catch (err) {}
+    }, true);
+})();
