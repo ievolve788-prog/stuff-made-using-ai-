@@ -1,0 +1,514 @@
+// ==UserScript==
+// @name         YouTube: No Bottom Recommendations + Speed Button
+// @namespace    https://tampermonkey.net/
+// @version      1.0.2
+// @description  Removes the recommended-video overlays at the bottom of the YouTube player (fullscreen scroll grid, pause overlay, end screen, end cards) and adds a small speed-control icon to the control bar that hides together with it. Includes a debug panel.
+// @match        https://www.youtube.com/*
+// @match        https://m.youtube.com/*
+// @run-at       document-idle
+// @grant        GM_addStyle
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_setClipboard
+// @grant        GM_registerMenuCommand
+// ==/UserScript==
+
+(function () {
+  'use strict';
+
+  const VERSION = '1.0.2';
+  const MIN = 0.1, MAX = 16, STEP = 0.25;
+  const PRESETS = [0.5, 1, 1.25, 1.5, 2, 3];
+  const STORE_KEY = 'yt_speed_value';
+  const REMEMBER_KEY = 'yt_speed_remember';
+
+  /* ------------------------------------------------------------------ */
+  /* Debug logger                                                        */
+  /* ------------------------------------------------------------------ */
+  const LOG_MAX = 500;
+  const logs = [];
+  function log(level, ...args) {
+    const t = new Date().toISOString().slice(11, 23);
+    const msg = args.map(a => {
+      if (a instanceof Error) return a.stack || a.message;
+      if (typeof a === 'object') { try { return JSON.stringify(a); } catch (e) { return String(a); } }
+      return String(a);
+    }).join(' ');
+    logs.push(`[${t}] ${level.toUpperCase()} ${msg}`);
+    if (logs.length > LOG_MAX) logs.shift();
+    if (level === 'error') console.error('[YT-Speed]', ...args);
+    refreshDebugPanel();
+  }
+  const dbg = (...a) => log('info', ...a);
+  const err = (...a) => log('error', ...a);
+
+  window.addEventListener('error', (e) => {
+    if (e && e.filename && String(e.filename).includes('userscript')) err('window error:', e.message, e.filename + ':' + e.lineno);
+  });
+
+  function snapshot() {
+    const v = getVideo();
+    const p = getPlayer();
+    const sel = (s) => document.querySelector(s) ? 'found' : 'missing';
+    return [
+      `=== YT Speed Control debug ===`,
+      `Script version: ${VERSION}`,
+      `Time: ${new Date().toString()}`,
+      `URL: ${location.href}`,
+      `UserAgent: ${navigator.userAgent}`,
+      `Tampermonkey API: GM_setClipboard=${typeof GM_setClipboard}, GM_getValue=${typeof GM_getValue}`,
+      `--- Elements ---`,
+      `.html5-video-player: ${sel('.html5-video-player')}`,
+      `video.html5-main-video: ${sel('video.html5-main-video')}`,
+      `.ytp-right-controls: ${sel('.ytp-right-controls')}`,
+      `#ytsp-btn (our button): ${sel('#ytsp-btn')}`,
+      `#ytsp-pop (our popup): ${sel('#ytsp-pop')}`,
+      `--- State ---`,
+      `Player classes: ${p ? p.className : 'n/a'}`,
+      `Controls auto-hidden: ${p ? p.classList.contains('ytp-autohide') : 'n/a'}`,
+      `Video playbackRate: ${v ? v.playbackRate : 'n/a'}`,
+      `Video paused: ${v ? v.paused : 'n/a'}  readyState: ${v ? v.readyState : 'n/a'}`,
+      `Saved speed: ${GM_getValue(STORE_KEY, 'none')}  Remember: ${GM_getValue(REMEMBER_KEY, true)}`,
+      `Fullscreen: ${!!document.fullscreenElement}`,
+      `--- Blur diagnostics ---`,
+      `Player grid/fullscreen classes: ${p ? [...p.classList].filter(c => /grid|fullscreen|pause|scrim|blur/i.test(c)).join(' ') || 'none' : 'n/a'}`,
+      ...(v ? [v, v.parentElement, p].filter(Boolean).map(el => {
+        const cs = getComputedStyle(el);
+        return `${el.tagName.toLowerCase()}.${String(el.className).split(' ')[0]}: filter=${cs.filter} backdrop=${cs.backdropFilter} opacity=${cs.opacity} transform=${cs.transform}`;
+      }) : []),
+      `--- Log (last ${logs.length}) ---`,
+      ...logs
+    ].join('\n');
+  }
+
+  async function copyDebug() {
+    const text = snapshot();
+    try {
+      if (typeof GM_setClipboard === 'function') GM_setClipboard(text, 'text');
+      else await navigator.clipboard.writeText(text);
+      toast('Debug info copied to clipboard');
+      dbg('Debug copied');
+    } catch (e) {
+      err('copy failed', e);
+      showDebug();
+      toast('Copy failed – select the text manually');
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Styles: hide recommendation overlays + our UI                       */
+  /* ------------------------------------------------------------------ */
+  GM_addStyle(`
+    /* Recommended videos at the bottom of the player */
+    /* Scoped to descendants of the player so a state class on the player itself can never hide the whole player */
+    .html5-video-player .ytp-fullscreen-grid,
+    .html5-video-player .ytp-fullscreen-grid-stills-container,
+    .html5-video-player .ytp-fullscreen-grid-hover-overlay,
+    .html5-video-player .ytp-fullscreen-grid-expand-button,
+    .html5-video-player .ytp-pause-overlay-container,
+    .html5-video-player .ytp-pause-overlay,
+    .html5-video-player .ytp-endscreen-content,
+    .html5-video-player .ytp-endscreen-previous,
+    .html5-video-player .ytp-endscreen-next,
+    .html5-video-player .videowall-endscreen,
+    .html5-video-player .ytp-ce-element,
+    .html5-video-player .ytp-suggestion-set,
+    .html5-video-player .ytp-videowall-still {
+      display: none !important;
+      visibility: hidden !important;
+      pointer-events: none !important;
+    }
+
+    /* Never let YouTube blur / dim / shrink the video (fullscreen grid + pause overlay effects) */
+    .html5-video-player video,
+    .html5-video-player .html5-video-container,
+    .html5-video-player .html5-video-container video {
+      filter: none !important;
+      -webkit-filter: none !important;
+      backdrop-filter: none !important;
+      opacity: 1 !important;
+    }
+    .html5-video-player .ytp-fullscreen-grid-backdrop,
+    .html5-video-player .ytp-scrim,
+    .html5-video-player .ytp-pause-overlay-backdrop {
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+      filter: none !important;
+    }
+
+    /* Speed button */
+    #ytsp-btn {
+      position: relative;
+      width: 48px; height: 100%;
+      display: inline-flex; align-items: center; justify-content: center;
+      cursor: pointer; vertical-align: top;
+    }
+    #ytsp-btn svg { width: 26px; height: 26px; fill: #fff; opacity: .9; }
+    #ytsp-btn:hover svg { opacity: 1; }
+    #ytsp-badge {
+      position: absolute; bottom: 6px; right: 2px;
+      font: 700 10px/1 Roboto, Arial, sans-serif; color: #fff;
+      background: rgba(0,0,0,.65); border-radius: 4px; padding: 1px 3px;
+      pointer-events: none;
+    }
+
+    /* Popup */
+    #ytsp-pop {
+      position: absolute; z-index: 2500; display: none;
+      min-width: 220px; padding: 10px 12px; box-sizing: border-box;
+      background: rgba(28,28,28,.95); color: #fff; border-radius: 12px;
+      font: 400 13px Roboto, Arial, sans-serif;
+      box-shadow: 0 4px 24px rgba(0,0,0,.5);
+      user-select: none;
+    }
+    #ytsp-pop.open { display: block; }
+    #ytsp-pop .row { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+    #ytsp-pop .center { justify-content: center; }
+    #ytsp-pop button {
+      background: rgba(255,255,255,.12); color: #fff; border: 0; border-radius: 8px;
+      padding: 5px 9px; cursor: pointer; font: inherit;
+    }
+    #ytsp-pop button:hover { background: rgba(255,255,255,.25); }
+    #ytsp-pop button.active { background: #fff; color: #000; }
+    #ytsp-pop .val { font-size: 20px; font-weight: 700; min-width: 70px; text-align: center; }
+    #ytsp-pop input[type=range] { flex: 1; }
+    #ytsp-pop label { display: flex; gap: 6px; align-items: center; font-size: 12px; opacity: .85; }
+    #ytsp-pop .presets { flex-wrap: wrap; justify-content: center; }
+    #ytsp-pop .dbgrow button { font-size: 11px; padding: 3px 7px; }
+
+    /* Debug panel */
+    #ytsp-debug {
+      position: fixed; z-index: 2147483647; right: 16px; bottom: 16px;
+      width: min(640px, 92vw); height: min(420px, 70vh);
+      background: #111; color: #ddd; border: 1px solid #444; border-radius: 10px;
+      display: none; flex-direction: column; font: 12px Consolas, monospace;
+    }
+    #ytsp-debug.open { display: flex; }
+    #ytsp-debug .bar { display: flex; gap: 6px; padding: 6px; border-bottom: 1px solid #333; }
+    #ytsp-debug .bar button { background: #2a2a2a; color: #fff; border: 0; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+    #ytsp-debug .bar button:hover { background: #3a3a3a; }
+    #ytsp-debug textarea { flex: 1; background: #111; color: #cfc; border: 0; padding: 8px; resize: none; outline: none; white-space: pre; }
+    #ytsp-toast {
+      position: fixed; z-index: 2147483647; left: 50%; bottom: 80px; transform: translateX(-50%);
+      background: rgba(0,0,0,.85); color: #fff; padding: 8px 14px; border-radius: 8px;
+      font: 13px Roboto, Arial, sans-serif; display: none;
+    }
+  `);
+
+  /* ------------------------------------------------------------------ */
+  /* Helpers                                                             */
+  /* ------------------------------------------------------------------ */
+  const getPlayer = () => document.querySelector('.html5-video-player');
+  const getVideo = () => document.querySelector('video.html5-main-video') || document.querySelector('video');
+  const clamp = (n) => Math.min(MAX, Math.max(MIN, Math.round(n * 100) / 100));
+  const fmt = (n) => (Math.round(n * 100) / 100).toString() + 'x';
+
+  let toastTimer;
+  function toast(text) {
+    let t = document.getElementById('ytsp-toast');
+    if (!t) { t = document.createElement('div'); t.id = 'ytsp-toast'; document.body.appendChild(t); }
+    t.textContent = text; t.style.display = 'block';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (t.style.display = 'none'), 1800);
+  }
+
+  let currentSpeed = Number(GM_getValue(STORE_KEY, 1)) || 1;
+
+  function setSpeed(n, opts = {}) {
+    n = clamp(n);
+    currentSpeed = n;
+    const v = getVideo();
+    if (v) {
+      try { v.playbackRate = n; } catch (e) { err('set playbackRate failed', e); }
+    } else {
+      dbg('setSpeed: no video element yet');
+    }
+    if (GM_getValue(REMEMBER_KEY, true)) GM_setValue(STORE_KEY, n);
+    updateUI();
+    if (!opts.silent) dbg('Speed set to', n);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Button + popup                                                      */
+  /* ------------------------------------------------------------------ */
+  // YouTube enforces Trusted Types, so innerHTML is blocked. Build everything with DOM APIs.
+  function h(tag, props, ...kids) {
+    const el = document.createElement(tag);
+    for (const k in (props || {})) {
+      const v = props[k];
+      if (k === 'class') el.className = v;
+      else if (k === 'text') el.textContent = v;
+      else el.setAttribute(k, v);
+    }
+    kids.forEach(k => el.appendChild(typeof k === 'string' ? document.createTextNode(k) : k));
+    return el;
+  }
+
+  function makeIcon() {
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    const path = document.createElementNS(NS, 'path');
+    path.setAttribute('d', 'M20.38 8.57l-1.23 1.85a8 8 0 0 1-.22 7.58H5.07A8 8 0 0 1 15.58 6.85l1.85-1.23A10 10 0 0 0 3.35 19a2 2 0 0 0 1.72 1h13.85a2 2 0 0 0 1.74-1 10 10 0 0 0-.27-10.44zM10.59 15.41a2 2 0 0 0 2.83 0l5.66-8.49-8.49 5.66a2 2 0 0 0 0 2.83z');
+    svg.appendChild(path);
+    return svg;
+  }
+
+  function buildPopup() {
+    const pop = h('div', { id: 'ytsp-pop' },
+      h('div', { class: 'row center' },
+        h('button', { 'data-a': 'dec', title: 'Slower', text: '−' }),
+        h('div', { class: 'val', id: 'ytsp-val', text: '1x' }),
+        h('button', { 'data-a': 'inc', title: 'Faster', text: '+' })),
+      h('div', { class: 'row' },
+        h('input', { id: 'ytsp-range', type: 'range', min: '0.25', max: '4', step: '0.05' })),
+      h('div', { class: 'row presets' },
+        ...PRESETS.map(p => h('button', { 'data-p': String(p), text: p + 'x' }))),
+      h('div', { class: 'row' },
+        h('label', {}, h('input', { type: 'checkbox', id: 'ytsp-remember' }), ' Remember speed')),
+      h('div', { class: 'row dbgrow' },
+        h('button', { 'data-a': 'showdbg', text: 'Show debug' }),
+        h('button', { 'data-a': 'copydbg', text: 'Copy debug' })));
+    // keep clicks from pausing / seeking the video
+    ['click', 'mousedown', 'mouseup', 'dblclick', 'pointerdown', 'contextmenu', 'keydown'].forEach(ev =>
+      pop.addEventListener(ev, e => e.stopPropagation()));
+    pop.addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      if (b.dataset.p) return setSpeed(parseFloat(b.dataset.p));
+      switch (b.dataset.a) {
+        case 'dec': setSpeed(currentSpeed - STEP); break;
+        case 'inc': setSpeed(currentSpeed + STEP); break;
+        case 'showdbg': showDebug(); break;
+        case 'copydbg': copyDebug(); break;
+      }
+    });
+    pop.querySelector('#ytsp-range').addEventListener('input', (e) => setSpeed(parseFloat(e.target.value), { silent: true }));
+    pop.querySelector('#ytsp-remember').addEventListener('change', (e) => {
+      GM_setValue(REMEMBER_KEY, e.target.checked);
+      if (e.target.checked) GM_setValue(STORE_KEY, currentSpeed);
+      dbg('Remember speed =', e.target.checked);
+    });
+    return pop;
+  }
+
+  function positionPopup() {
+    const pop = document.getElementById('ytsp-pop');
+    const btn = document.getElementById('ytsp-btn');
+    const player = getPlayer();
+    if (!pop || !btn || !player) return;
+    const pr = player.getBoundingClientRect();
+    const br = btn.getBoundingClientRect();
+    pop.style.left = 'auto';
+    pop.style.right = Math.max(8, pr.right - br.right - 8) + 'px';
+    pop.style.bottom = Math.max(8, pr.bottom - br.top + 8) + 'px';
+  }
+
+  function togglePopup(force) {
+    const pop = document.getElementById('ytsp-pop');
+    if (!pop) return;
+    const open = typeof force === 'boolean' ? force : !pop.classList.contains('open');
+    pop.classList.toggle('open', open);
+    if (open) positionPopup();
+    dbg('Popup', open ? 'opened' : 'closed');
+  }
+
+  function updateUI() {
+    const badge = document.getElementById('ytsp-badge');
+    const val = document.getElementById('ytsp-val');
+    const range = document.getElementById('ytsp-range');
+    const rem = document.getElementById('ytsp-remember');
+    if (badge) badge.textContent = fmt(currentSpeed);
+    if (val) val.textContent = fmt(currentSpeed);
+    if (range && document.activeElement !== range) range.value = Math.min(4, Math.max(0.25, currentSpeed));
+    if (rem) rem.checked = !!GM_getValue(REMEMBER_KEY, true);
+    document.querySelectorAll('#ytsp-pop [data-p]').forEach(b =>
+      b.classList.toggle('active', parseFloat(b.dataset.p) === currentSpeed));
+  }
+
+  function ensureUI() {
+    try {
+      const player = getPlayer();
+      const controls = document.querySelector('.ytp-right-controls');
+      if (!player || !controls) return;
+
+      let btn = document.getElementById('ytsp-btn');
+      if (!btn || !controls.contains(btn)) {
+        if (btn) btn.remove();
+        btn = document.createElement('div');
+        btn.id = 'ytsp-btn';
+        btn.className = 'ytp-button';
+        btn.title = 'Playback speed (click for menu, scroll wheel to change)';
+        btn.appendChild(makeIcon());
+        btn.appendChild(h('span', { id: 'ytsp-badge' }));
+        btn.addEventListener('click', (e) => { e.stopPropagation(); togglePopup(); });
+        btn.addEventListener('wheel', (e) => {
+          e.preventDefault(); e.stopPropagation();
+          setSpeed(currentSpeed + (e.deltaY < 0 ? 0.05 : -0.05));
+        }, { passive: false });
+        controls.insertBefore(btn, controls.firstChild);
+        dbg('Button inserted');
+      }
+
+      let pop = document.getElementById('ytsp-pop');
+      if (!pop || !player.contains(pop)) {
+        if (pop) pop.remove();
+        pop = buildPopup();
+        player.appendChild(pop);
+        dbg('Popup inserted');
+      }
+      updateUI();
+    } catch (e) {
+      const key = String(e && e.message);
+      if (!ensureUI.seen) ensureUI.seen = new Set();
+      if (!ensureUI.seen.has(key)) { ensureUI.seen.add(key); err('ensureUI failed', e); }
+    }
+  }
+
+  /* Hide popup whenever the bottom control bar hides */
+  let classObserver;
+  function watchPlayerClass() {
+    const player = getPlayer();
+    if (!player || player.__ytspWatched) return;
+    player.__ytspWatched = true;
+    if (classObserver) classObserver.disconnect();
+    classObserver = new MutationObserver(() => {
+      if (player.classList.contains('ytp-autohide')) {
+        const pop = document.getElementById('ytsp-pop');
+        if (pop && pop.classList.contains('open')) { togglePopup(false); dbg('Controls hid -> popup closed'); }
+      }
+    });
+    classObserver.observe(player, { attributes: true, attributeFilter: ['class'] });
+    dbg('Watching player class for autohide');
+  }
+
+  /* Re-apply speed when YouTube resets it (new video, ads, etc.) */
+  function watchVideo() {
+    const v = getVideo();
+    if (!v || v.__ytspWatched) return;
+    v.__ytspWatched = true;
+    const apply = () => {
+      if (!GM_getValue(REMEMBER_KEY, true) && !v.__ytspTouched) return;
+      if (Math.abs(v.playbackRate - currentSpeed) > 0.001) {
+        dbg('Reapplying speed', currentSpeed, '(was', v.playbackRate + ')');
+        try { v.playbackRate = currentSpeed; } catch (e) { err(e); }
+      }
+    };
+    ['loadedmetadata', 'loadeddata', 'playing', 'ratechange'].forEach(ev => v.addEventListener(ev, () => {
+      if (ev === 'ratechange') {
+        // someone else changed rate (e.g. YouTube's own menu) -> sync our UI
+        if (Math.abs(v.playbackRate - currentSpeed) > 0.001 && v.__ytspTouched) { /* YT reset */ apply(); return; }
+      }
+      apply();
+    }));
+    v.__ytspTouched = true;
+    v.playbackRate = currentSpeed;
+    dbg('Video watched, initial speed applied', currentSpeed);
+  }
+
+  /* Close popup when clicking elsewhere */
+  document.addEventListener('click', (e) => {
+    const pop = document.getElementById('ytsp-pop');
+    if (pop && pop.classList.contains('open') && !pop.contains(e.target) && !e.target.closest('#ytsp-btn')) togglePopup(false);
+  }, true);
+
+  /* ------------------------------------------------------------------ */
+  /* Debug panel                                                         */
+  /* ------------------------------------------------------------------ */
+  function buildDebugPanel() {
+    let p = document.getElementById('ytsp-debug');
+    if (p) return p;
+    p = h('div', { id: 'ytsp-debug' },
+      h('div', { class: 'bar' },
+        h('button', { 'data-a': 'copy', text: 'Copy' }),
+        h('button', { 'data-a': 'refresh', text: 'Refresh' }),
+        h('button', { 'data-a': 'clear', text: 'Clear log' }),
+        h('button', { 'data-a': 'test', text: 'Self-test' }),
+        h('button', { 'data-a': 'close', style: 'margin-left:auto', text: 'Close' })),
+      h('textarea', { readonly: '', spellcheck: 'false' }));
+    p.addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      if (b.dataset.a === 'copy') copyDebug();
+      if (b.dataset.a === 'refresh') refreshDebugPanel(true);
+      if (b.dataset.a === 'clear') { logs.length = 0; dbg('Log cleared'); }
+      if (b.dataset.a === 'close') p.classList.remove('open');
+      if (b.dataset.a === 'test') selfTest();
+    });
+    ['keydown', 'keyup', 'keypress'].forEach(ev => p.addEventListener(ev, e => e.stopPropagation()));
+    document.body.appendChild(p);
+    return p;
+  }
+
+  function refreshDebugPanel(force) {
+    const p = document.getElementById('ytsp-debug');
+    if (!p || (!force && !p.classList.contains('open'))) return;
+    const ta = p.querySelector('textarea');
+    ta.value = snapshot();
+    ta.scrollTop = ta.scrollHeight;
+  }
+
+  function showDebug() {
+    const p = buildDebugPanel();
+    p.classList.add('open');
+    refreshDebugPanel(true);
+  }
+
+  function selfTest() {
+    dbg('--- self-test ---');
+    dbg('player:', !!getPlayer(), 'video:', !!getVideo(), 'controls:', !!document.querySelector('.ytp-right-controls'));
+    dbg('button in DOM:', !!document.getElementById('ytsp-btn'));
+    const hidden = ['.ytp-fullscreen-grid', '.ytp-pause-overlay', '.ytp-endscreen-content', '.ytp-ce-element'];
+    hidden.forEach(s => {
+      const el = document.querySelector(s);
+      dbg(s, el ? ('present, display=' + getComputedStyle(el).display) : 'not present (ok)');
+    });
+    const v = getVideo();
+    if (v) { const old = v.playbackRate; v.playbackRate = old; dbg('playbackRate read/write OK:', v.playbackRate); }
+    dbg('--- end self-test ---');
+  }
+
+  GM_registerMenuCommand('Show debug panel', showDebug);
+  GM_registerMenuCommand('Copy debug info', copyDebug);
+  GM_registerMenuCommand('Reset speed to 1x', () => setSpeed(1));
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.altKey && e.code === 'KeyD') { e.preventDefault(); showDebug(); }
+  });
+
+  /* ------------------------------------------------------------------ */
+  /* Boot                                                                */
+  /* ------------------------------------------------------------------ */
+  // Classes that switch on YouTube's "scroll down for recommendations" grid (and its blur effect)
+  const GRID_CLASSES = ['ytp-grid-scrollable', 'ytp-fullscreen-grid-active', 'ytp-fullscreen-grid-peeking', 'ytp-fullscreen-grid-expanded'];
+  function stripGridClasses() {
+    const p = getPlayer();
+    if (!p) return;
+    GRID_CLASSES.forEach(c => { if (p.classList.contains(c)) { p.classList.remove(c); dbg('Removed player class', c); } });
+  }
+
+  // In fullscreen, scrolling is what opens the recommendations grid -> swallow wheel events there
+  // (except over our own speed button / menu, which use the wheel themselves)
+  window.addEventListener('wheel', (e) => {
+    if (!document.fullscreenElement) return;
+    if (e.target && e.target.closest && e.target.closest('#ytsp-btn, #ytsp-pop, #ytsp-debug')) return;
+    e.stopImmediatePropagation();
+  }, { capture: true, passive: true });
+
+  function tick() {
+    stripGridClasses();
+    ensureUI();
+    watchPlayerClass();
+    watchVideo();
+  }
+
+  dbg('Script started v' + VERSION, location.href);
+  tick();
+  setInterval(tick, 1000);                       // survives SPA re-renders
+  window.addEventListener('yt-navigate-finish', () => {
+    dbg('yt-navigate-finish');
+    const p = getPlayer(); if (p) p.__ytspWatched = false;
+    const v = getVideo(); if (v) v.__ytspWatched = false;
+    tick();
+  });
+  document.addEventListener('fullscreenchange', () => { dbg('fullscreenchange:', !!document.fullscreenElement); togglePopup(false); });
+  window.addEventListener('resize', () => positionPopup());
+})();
