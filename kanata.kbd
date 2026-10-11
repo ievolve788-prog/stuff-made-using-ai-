@@ -1,0 +1,108 @@
+(defcfg
+  process-unmapped-keys yes
+  concurrent-tap-hold yes
+)
+
+(defsrc
+  lctl lsft lmet lalt ralt rctl rsft caps c s d f e j k l , pgdn mwu mwd mlft mrgt
+)
+
+(defvar
+  tap-time 200
+)
+
+(defalias
+
+  ;; --- Physical Modifier One-Shot Aliases (Single Tap = OSM) ---
+  os-lctl (one-shot-press-pcancel 2000 lctl)
+  os-lsft (one-shot-press-pcancel 2000 lsft)
+  os-lmet (one-shot-press-pcancel 2000 lmet)
+  os-lalt (one-shot-press-pcancel 2000 lalt)
+  os-ralt (one-shot-press-pcancel 2000 ralt)
+  os-rctl (one-shot-press-pcancel 2000 rctl)
+  os-rsft (one-shot-press-pcancel 2000 rsft)
+
+  ;; --- Physical Modifier Lock Aliases (Double Tap = Lock Toggle) ---
+  lock-lctl (on-press toggle-vkey v-lctl)
+  lock-lsft (on-press toggle-vkey v-lsft)
+  lock-lmet (on-press toggle-vkey v-lmet)
+  lock-lalt (on-press toggle-vkey v-lalt)
+  lock-ralt (on-press toggle-vkey v-ralt)
+  lock-rctl (on-press toggle-vkey v-rctl)
+  lock-rsft (on-press toggle-vkey v-rsft)
+
+  ;; --- Physical Modifier Tap-Dance ---
+  ;; Hold       = Regular Modifier (eager zero-delay execution)
+  ;; Single Tap = One-Shot Modifier (OSM)
+  ;; Double Tap = Modifier Lock (Toggle ON/OFF)
+  td-lctl (tap-dance-eager $tap-time (@os-lctl @lock-lctl))
+  td-lsft (tap-dance-eager $tap-time (@os-lsft @lock-lsft))
+  td-lmet (tap-dance-eager $tap-time (@os-lmet @lock-lmet))
+  td-lalt (tap-dance-eager $tap-time (@os-lalt @lock-lalt))
+  td-ralt (tap-dance-eager $tap-time (@os-ralt @lock-ralt))
+  td-rctl (tap-dance-eager $tap-time (@os-rctl @lock-rctl))
+  td-rsft (tap-dance-eager $tap-time (@os-rsft @lock-rsft))
+
+  ;; --- Toggle Normal / Passthrough Layer ---
+  toggle-passthrough (switch
+    ((base-layer passthrough)) (layer-switch base) break
+    () (layer-switch passthrough) break
+  )
+
+  ;; Toggle left mouse click drag
+  toggle-drag (on-press toggle-vkey drag-vk)
+
+  ;; Toggle PageDown lock
+  toggle-pgdn (on-press toggle-vkey pgdn-vk)
+
+  ;; Smart PageDown
+  pgdn-action (switch
+    ((and (or (input real lctl) (input real rctl) (input real f) (input real j))
+          (or (input real lsft) (input real rsft) (input real d) (input real k)))) @toggle-pgdn break
+    () pgdn break
+  )
+
+  ;; Mouse wheel volume control
+  scroll-up (switch
+    ((input real caps)) volu break
+    () mwu break
+  )
+  scroll-down (switch
+    ((input real caps)) voldwn break
+    () mwd break
+  )
+
+  ;; Caps + Left Click = Copy, Caps + Right Click = Paste
+  click-copy  (switch ((input real caps)) C-c break () mlft break)
+  click-paste (switch ((input real caps)) C-v break () mrgt break)
+)
+
+;; Primary Base Layer (Home row keys are standard letters with 0 latency)
+(deflayer base
+  @td-lctl @td-lsft @td-lmet @td-lalt @td-ralt @td-rctl @td-rsft caps c s d f e j k l , @pgdn-action @scroll-up @scroll-down @click-copy @click-paste
+)
+
+;; 100% Normal Keyboard Layer (Zero Kanata Remappings / Pure Passthrough)
+(deflayer passthrough
+  lctl lsft lmet lalt ralt rctl rsft caps c s d f e j k l , pgdn mwu mwd mlft mrgt
+)
+
+(defvirtualkeys
+  drag-vk mlft
+  pgdn-vk pgdn
+
+  ;; Virtual keys for modifier lock
+  v-lctl lctl
+  v-lsft lsft
+  v-lmet lmet
+  v-lalt lalt
+  v-ralt ralt
+  v-rctl rctl
+  v-rsft rsft
+)
+
+(defchordsv2
+  ;; Press U + I + O simultaneously to toggle Normal Passthrough Mode ON/OFF
+  (u i o) @toggle-passthrough 200 first-release ()
+  (s e f) @toggle-drag 200 first-release ()
+)
