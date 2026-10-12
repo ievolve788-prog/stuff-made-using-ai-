@@ -1,0 +1,9 @@
+ytc() {
+  local tmp name
+  tmp=$(mktemp)
+  yt-dlp --write-comments --skip-download --no-warnings -J "$1" >| "$tmp" || { rm -f "$tmp"; return 1; }
+  name=$(jq -r '.title | gsub("[^A-Za-z0-9 ]";"") | .[0:60]' "$tmp")
+  jq -r '.comments[]? | "\(.author): \(.text)\n---"' "$tmp" >| "comments_${name}.txt"
+  rm -f "$tmp"
+  echo "Saved comments_${name}.txt"
+}
