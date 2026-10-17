@@ -1,10 +1,11 @@
+
 (defcfg
   process-unmapped-keys yes
   concurrent-tap-hold yes
 )
 
 (defsrc
-  lctl lsft lmet lalt ralt rctl rsft caps c s d f e j k l , pgdn mwu mwd mlft mrgt
+  lctl lsft lmet lalt ralt rctl rsft caps c s d f e j k l , u i o pgdn mwu mwd mlft mrgt
 )
 
 (defvar
@@ -12,7 +13,6 @@
 )
 
 (defalias
-
   ;; --- Physical Modifier One-Shot Aliases (Single Tap = OSM) ---
   os-lctl (one-shot-press-pcancel 2000 lctl)
   os-lsft (one-shot-press-pcancel 2000 lsft)
@@ -32,9 +32,6 @@
   lock-rsft (on-press toggle-vkey v-rsft)
 
   ;; --- Physical Modifier Tap-Dance ---
-  ;; Hold       = Regular Modifier (eager zero-delay execution)
-  ;; Single Tap = One-Shot Modifier (OSM)
-  ;; Double Tap = Modifier Lock (Toggle ON/OFF)
   td-lctl (tap-dance-eager $tap-time (@os-lctl @lock-lctl))
   td-lsft (tap-dance-eager $tap-time (@os-lsft @lock-lsft))
   td-lmet (tap-dance-eager $tap-time (@os-lmet @lock-lmet))
@@ -59,13 +56,13 @@
     () pgdn break
   )
 
-  ;; Mouse wheel volume control (when physical Caps Lock is held)
+  ;; Mouse wheel volume control (Active when physical Right Alt is held)
   scroll-up (switch
-    ((input real caps)) volu break
+    ((input real ralt)) volu break
     () mwu break
   )
   scroll-down (switch
-    ((input real caps)) voldwn break
+    ((input real ralt)) voldwn break
     () mwd break
   )
 
@@ -74,14 +71,14 @@
   click-paste (switch ((input real caps)) C-v break () mrgt break)
 )
 
-;; Primary Base Layer (Caps Lock slot mapped to mlft for Hold-to-Drag)
+;; Primary Base Layer
 (deflayer base
-  @td-lctl @td-lsft @td-lmet @td-lalt @td-ralt @td-rctl @td-rsft mlft c s d f e j k l , @pgdn-action @scroll-up @scroll-down @click-copy @click-paste
+  @td-lctl @td-lsft @td-lmet @td-lalt @td-ralt @td-rctl @td-rsft mlft c s d f e j k l , u i o @pgdn-action @scroll-up @scroll-down @click-copy @click-paste
 )
 
 ;; 100% Normal Keyboard Layer (Zero Kanata Remappings / Pure Passthrough)
 (deflayer passthrough
-  lctl lsft lmet lalt ralt rctl rsft caps c s d f e j k l , pgdn mwu mwd mlft mrgt
+  lctl lsft lmet lalt ralt rctl rsft caps c s d f e j k l , u i o pgdn mwu mwd mlft mrgt
 )
 
 (defvirtualkeys
@@ -101,3 +98,7 @@
   ;; Press U + I + O simultaneously to toggle Normal Passthrough Mode ON/OFF
   (u i o) @toggle-passthrough 200 first-release ()
 )
+
+ 
+
+### Key Cha
