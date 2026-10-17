@@ -49,9 +49,6 @@
     () (layer-switch passthrough) break
   )
 
-  ;; Toggle left mouse click drag
-  toggle-drag (on-press toggle-vkey drag-vk)
-
   ;; Toggle PageDown lock
   toggle-pgdn (on-press toggle-vkey pgdn-vk)
 
@@ -62,7 +59,7 @@
     () pgdn break
   )
 
-  ;; Mouse wheel volume control
+  ;; Mouse wheel volume control (when physical Caps Lock is held)
   scroll-up (switch
     ((input real caps)) volu break
     () mwu break
@@ -77,9 +74,9 @@
   click-paste (switch ((input real caps)) C-v break () mrgt break)
 )
 
-;; Primary Base Layer (Home row keys are standard letters with 0 latency)
+;; Primary Base Layer (Caps Lock slot mapped to mlft for Hold-to-Drag)
 (deflayer base
-  @td-lctl @td-lsft @td-lmet @td-lalt @td-ralt @td-rctl @td-rsft caps c s d f e j k l , @pgdn-action @scroll-up @scroll-down @click-copy @click-paste
+  @td-lctl @td-lsft @td-lmet @td-lalt @td-ralt @td-rctl @td-rsft mlft c s d f e j k l , @pgdn-action @scroll-up @scroll-down @click-copy @click-paste
 )
 
 ;; 100% Normal Keyboard Layer (Zero Kanata Remappings / Pure Passthrough)
@@ -88,7 +85,6 @@
 )
 
 (defvirtualkeys
-  drag-vk mlft
   pgdn-vk pgdn
 
   ;; Virtual keys for modifier lock
@@ -104,5 +100,4 @@
 (defchordsv2
   ;; Press U + I + O simultaneously to toggle Normal Passthrough Mode ON/OFF
   (u i o) @toggle-passthrough 200 first-release ()
-  (s e f) @toggle-drag 200 first-release ()
 )
