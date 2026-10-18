@@ -1,11 +1,10 @@
-
 (defcfg
   process-unmapped-keys yes
   concurrent-tap-hold yes
 )
 
 (defsrc
-  lctl lsft lmet lalt ralt rctl rsft caps a c s d f e j k l , u i o pgdn mwu mwd mlft mrgt
+  lctl lsft lmet lalt ralt rctl rsft caps c s d f e j k l , u i o pgdn mwu mwd mlft mrgt
 )
 
 (defvar
@@ -56,7 +55,7 @@
     () pgdn break
   )
 
-  ;; Mouse wheel volume control (Active when physical Right Alt is held)
+  ;; --- Mouse Wheel Volume Control (Active when physical Right Alt is held) ---
   scroll-up (switch
     ((input real ralt)) volu break
     () mwu break
@@ -65,21 +64,16 @@
     ((input real ralt)) voldwn break
     () mwd break
   )
-
-  ;; --- Caps Lock + Home-Row Mouse Button Bindings ---
-  caps-a (switch ((input real caps)) mmid break () a break)
-  caps-s (switch ((input real caps)) mlft break () s break)
-  caps-d (switch ((input real caps)) mrgt break () d break)
 )
 
 ;; Primary Base Layer
 (deflayer base
-  @td-lctl @td-lsft @td-lmet @td-lalt @td-ralt @td-rctl @td-rsft caps @caps-a c @caps-s @caps-d f e j k l , u i o @pgdn-action @scroll-up @scroll-down mlft mrgt
+  @td-lctl @td-lsft @td-lmet @td-lalt mrgt mmid @td-rsft mlft c s d f e j k l , u i o @pgdn-action @scroll-up @scroll-down mlft mrgt
 )
 
 ;; 100% Normal Keyboard Layer (Zero Kanata Remappings / Pure Passthrough)
 (deflayer passthrough
-  lctl lsft lmet lalt ralt rctl rsft caps a c s d f e j k l , u i o pgdn mwu mwd mlft mrgt
+  lctl lsft lmet lalt ralt rctl rsft caps c s d f e j k l , u i o pgdn mwu mwd mlft mrgt
 )
 
 (defvirtualkeys
@@ -99,3 +93,5 @@
   ;; Press U + I + O simultaneously to toggle Normal Passthrough Mode ON/OFF
   (u i o) @toggle-passthrough 200 first-release ()
 )
+
+ 
