@@ -1,4 +1,4 @@
- 
+
 (defcfg
   process-unmapped-keys yes
   concurrent-tap-hold yes
@@ -57,14 +57,23 @@
   )
 
   ;; --- Right Alt Action ---
-  ;; Tap = Right Click (mrgt)
+  ;; Single Tap = Right Click (mrgt)
+  ;; Double Tap = Middle Click (mmid)
   ;; Hold = Toggle Volume Control Layer
-  ralt-vol (tap-hold-press $tap-time $tap-time mrgt (layer-toggle volume))
+  td-ralt-click (tap-dance $tap-time (mrgt mmid))
+  ralt-vol (tap-hold-press $tap-time $tap-time @td-ralt-click (layer-toggle volume))
+
+  ;; --- Right Ctrl Action ---
+  ;; Single Tap = Paste (C-v)
+  ;; Double Tap = Copy (C-c)
+  ;; Hold = Cut (C-x)
+  td-rctl-clip (tap-dance $tap-time (C-v C-c))
+  rctl-clip (tap-hold-press $tap-time $tap-time @td-rctl-clip C-x)
 )
 
 ;; Primary Base Layer
 (deflayer base
-  @td-lctl @td-lsft @td-lmet @td-lalt @ralt-vol mmid @td-rsft mlft c s d f e j k l , u i o @pgdn-action mwu mwd mlft mrgt
+  @td-lctl @td-lsft @td-lmet @td-lalt @ralt-vol @rctl-clip @td-rsft mlft c s d f e j k l , u i o @pgdn-action mwu mwd mlft mrgt
 )
 
 ;; Dedicated Volume Control Layer (Active ONLY while holding Right Alt)
@@ -94,4 +103,3 @@
   ;; Press U + I + O simultaneously to toggle Normal Passthrough Mode ON/OFF
   (u i o) @toggle-passthrough 200 first-release ()
 )
- 
