@@ -1,4 +1,3 @@
-
 (defcfg
   process-unmapped-keys yes
   concurrent-tap-hold yes
@@ -64,10 +63,10 @@
   ralt-vol (tap-hold-press $tap-time $tap-time @td-ralt-click (layer-toggle volume))
 
   ;; --- Right Ctrl Action ---
-  ;; Single Tap = Paste (C-v)
-  ;; Double Tap = Copy (C-c)
+  ;; Single Tap = Copy (C-c)
+  ;; Double Tap = Paste (C-v)
   ;; Hold = Cut (C-x)
-  td-rctl-clip (tap-dance $tap-time (C-v C-c))
+  td-rctl-clip (tap-dance $tap-time (C-c C-v))
   rctl-clip (tap-hold-press $tap-time $tap-time @td-rctl-clip C-x)
 )
 
