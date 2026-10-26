@@ -1,0 +1,297 @@
+// ==UserScript==
+// @name         YouTube Randomizer Buttons
+// @namespace    local.yt.randomizer
+// @version      1.1.0
+// @description  Adds toggleable buttons / menu commands that type a random query with a random date range into the YouTube search bar and press search.
+// @match        https://www.youtube.com/*
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_registerMenuCommand
+// @grant        GM_unregisterMenuCommand
+// @run-at       document-idle
+// ==/UserScript==
+
+(function () {
+  'use strict';
+
+  /* ------------------------------------------------------------------ *
+   * Settings (persisted with Tampermonkey storage)
+   * ------------------------------------------------------------------ */
+  const DEFAULTS = {
+    panel: true,       // show floating button panel
+    homeOnly: true,    // show panel only on the homepage and search results page
+    debug: false,      // log + toast the generated query
+    fillOnly: false,   // type the query into the search bar but don't press search
+    long: false,       // "long videos" filter (20+ min) - uses URL navigation
+    collapsed: false,  // panel collapsed to a small pill
+    minYear: '',       // optional min year (2005+)
+    maxYear: '',       // optional max year
+    term: ''           // optional search term (blank = random word in Keyword mode)
+  };
+  const get = (k) => GM_getValue(k, DEFAULTS[k]);
+  const set = (k, v) => GM_setValue(k, v);
+
+  /* ------------------------------------------------------------------ *
+   * Date helpers (local time - avoids toISOString UTC shift)
+   * ------------------------------------------------------------------ */
+  const pad = (n) => String(n).padStart(2, '0');
+  const fmt = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+  const randBetween = (a, b) => new Date(a.getTime() + Math.random() * (b.getTime() - a.getTime()));
+  const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+  function dateRange() {
+    let min = new Date(2005, 3, 23); // YouTube launch
+    let max = new Date();
+    const a = parseInt(get('minYear'), 10);
+    const b = parseInt(get('maxYear'), 10);
+    if (a >= 2005) min = new Date(a, 0, 1);
+    if (b >= 2005) { const e = new Date(b, 11, 31); if (e < max) max = e; }
+    if (min > max) [min, max] = [max, min];
+    return { min, max };
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Query builders
+   * ------------------------------------------------------------------ */
+  // Add more words here (or paste the big list from your web page).
+  const WORDS = ['abandon','absolute','academy','accident','acoustic','adventure','airport','alarm','album','alien',
+    'amazing','ancient','animal','anniversary','apartment','apple','arcade','army','art','attic','audition','autumn',
+    'baby','backyard','bakery','balloon','band','barbecue','baseball','basement','beach','bicycle','birthday','boat',
+    'bonfire','book','bridge','broken','bus','cabin','cake','camera','camp','candle','car','carnival','cartoon','castle',
+    'cat','celebration','ceremony','chess','chicken','childhood','christmas','church','circus','city','classroom','clock',
+    'clown','coffee','comedy','computer','concert','cooking','costume','cousin','crash','dance','dinner','dog','dragon',
+    'dream','drive','drum','eclipse','elephant','engine','experiment','factory','family','farm','festival','fireworks',
+    'fishing','flight','flood','football','forest','friends','garage','garden','ghost','graduation','grandma','guitar',
+    'halloween','hamster','harbor','helicopter','highway','hiking','holiday','horse','hospital','house','island',
+    'jungle','karaoke','kitchen','kitten','lake','laptop','lecture','library','lighthouse','magic','market','marathon',
+    'mountain','museum','music','night','ocean','orchestra','painting','parade','party','piano','picnic','pizza',
+    'playground','rain','recital','road','robot','rocket','sailing','school','science','skateboard','snow','soccer',
+    'storm','street','summer','sunset','swimming','teacher','theater','thunder','train','travel','tree','vacation',
+    'village','wedding','winter','workshop','zoo'];
+
+  const FILE_PREFIXES = ['MOV_','VID_','DSC_','IMG_','CIMG','SANY','HPIM','DSC0','DCIM','WP_00','PHOTO','IMAGE','M2U0',
+    'EK00','CNV','VID0','CAM0','VCLP','SDV_','VIDEO','IMAG','PTDC','PICT','MAH0','GH01','GP01'];
+
+  const q = (s) => `"${s}"`;
+
+  function keywordQuery() {
+    const { min, max } = dateRange();
+    const term = (get('term') || '').trim() || pick(WORDS);
+    const end = randBetween(min, max);
+    let start = addDays(end, -30);
+    if (start < min) start = min;
+    return `${term} after:${fmt(start)} before:${fmt(end)}`;
+  }
+
+  function fileQuery() {
+    const { min, max } = dateRange();
+    const term = (get('term') || '').trim();
+    const num = String(Math.floor(Math.random() * 1000) + 1).padStart(4, '0');
+    const always = ['MOV_', 'VID_', 'DSC_', 'IMG_'];
+    const rest = FILE_PREFIXES.filter((p) => !always.includes(p)).sort(() => Math.random() - 0.5).slice(0, 6);
+    const parts = [...always, ...rest].map((p) => q(p + num));
+    parts.push(q('via YouTube Capture'), q('Created using the One True Media YouTube App'),
+      q('This video was uploaded from an Android phone'), q('using a Flip Video camcorder'), q('Untitled'));
+    const day = randBetween(min, max);
+    return `${term ? term + ' ' : ''}(${parts.join(' OR ')}) after:${fmt(day)} before:${fmt(addDays(day, 2))}`;
+  }
+
+  const SHORT_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const FULL_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+  function dateQuery() {
+    const { min, max } = dateRange();
+    const term = (get('term') || '').trim();
+    const d = randBetween(min, max);
+    const day = d.getDate(), m = d.getMonth();
+    const forms = [
+      `${SHORT_MONTHS[m]} ${day}`, `${FULL_MONTHS[m]} ${day}`, `${m + 1}/${day}`, `${m + 1}-${day}`,
+      `${day}/${m + 1}`, `${day}-${m + 1}`, `${day} ${SHORT_MONTHS[m]}`, `${day} ${FULL_MONTHS[m]}`
+    ].map(q);
+    return `${term ? term + ' ' : ''}(${forms.join(' OR ')}) after:${fmt(d)} before:${fmt(addDays(d, 1))}`;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Putting the query into YouTube's search bar and clicking search
+   * ------------------------------------------------------------------ */
+  const LONG_SP = 'EgQQARgC'; // type=video, duration>20min
+
+  function submit(query, modeName) {
+    if (get('debug')) {
+      console.log(`[YT Randomizer] ${modeName}:`, query);
+      toast(`${modeName}: ${query}`);
+    }
+
+    const input = document.querySelector('input[name="search_query"]') || document.querySelector('input#search');
+    const longUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&sp=${LONG_SP}`;
+
+    if (!input) { location.href = longUrl; return; }
+
+    input.focus();
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    setter.call(input, query);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+
+    if (get('fillOnly')) return;
+
+    if (get('long')) { setTimeout(() => { location.href = longUrl; }, 150); return; }
+
+    setTimeout(() => {
+      const btn = document.querySelector('#search-icon-legacy') ||
+                  document.querySelector('button[aria-label="Search"]') ||
+                  document.querySelector('ytd-searchbox button');
+      if (btn) btn.click();
+      else input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+    }, 150);
+  }
+
+  const MODES = {
+    keyword: () => submit(keywordQuery(), 'Keyword'),
+    file: () => submit(fileQuery(), 'File'),
+    date: () => submit(dateQuery(), 'Date'),
+    any: () => pick([MODES.keyword, MODES.file, MODES.date])()
+  };
+
+  /* ------------------------------------------------------------------ *
+   * Tiny DOM helpers (no innerHTML - YouTube enforces Trusted Types)
+   * ------------------------------------------------------------------ */
+  function el(tag, props = {}, style = {}, children = []) {
+    const n = document.createElement(tag);
+    Object.assign(n, props);
+    Object.assign(n.style, style);
+    children.forEach((c) => n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c));
+    return n;
+  }
+
+  let toastEl = null, toastTimer = null;
+  function toast(msg) {
+    if (!toastEl) {
+      toastEl = el('div', {}, {
+        position: 'fixed', left: '50%', bottom: '24px', transform: 'translateX(-50%)', maxWidth: '80vw',
+        background: '#111', color: '#fff', padding: '8px 14px', borderRadius: '8px', fontSize: '12px',
+        fontFamily: 'monospace', zIndex: 2147483647, wordBreak: 'break-all', border: '1px solid #f00'
+      });
+      document.body.appendChild(toastEl);
+    }
+    toastEl.textContent = msg;
+    toastEl.style.display = 'block';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toastEl.style.display = 'none'; }, 6000);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Floating panel
+   * ------------------------------------------------------------------ */
+  const PANEL_ID = 'yt-randomizer-panel';
+
+  // Pages where the panel shows when "Home & search pages only" is ON.
+  function isAllowedPage() {
+    return location.pathname === '/' || location.pathname === '/results';
+  }
+
+  function btn(label, onClick, primary) {
+    return el('button', { textContent: label, onclick: onClick }, {
+      cursor: 'pointer', padding: '6px 10px', margin: '2px 0', width: '100%', borderRadius: '6px',
+      border: primary ? 'none' : '1px solid #f00', background: primary ? '#f00' : 'transparent',
+      color: '#fff', fontSize: '12px', fontWeight: 'bold'
+    });
+  }
+
+  function field(label, key, placeholder, width) {
+    const input = el('input', { type: 'text', placeholder, value: get(key) }, {
+      width: width || '70px', background: '#222', color: '#fff', border: '1px solid #555',
+      borderRadius: '4px', padding: '3px 5px', fontSize: '12px'
+    });
+    input.addEventListener('input', () => set(key, input.value.trim()));
+    // stop YouTube hotkeys while typing
+    ['keydown', 'keyup', 'keypress'].forEach((ev) => input.addEventListener(ev, (e) => e.stopPropagation()));
+    return el('label', {}, { display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      gap: '6px', fontSize: '11px', margin: '3px 0' }, [label, input]);
+  }
+
+  function check(label, key, after) {
+    const cb = el('input', { type: 'checkbox', checked: !!get(key) });
+    cb.addEventListener('change', () => { set(key, cb.checked); if (after) after(); });
+    return el('label', {}, { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', margin: '2px 0' },
+      [cb, label]);
+  }
+
+  function buildPanel() {
+    const old = document.getElementById(PANEL_ID);
+    if (old) old.remove();
+    if (!get('panel')) return;
+    if (get('homeOnly') && !isAllowedPage()) return;
+
+    const box = el('div', { id: PANEL_ID }, {
+      position: 'fixed', right: '16px', bottom: '16px', zIndex: 2147483646, width: '190px',
+      background: 'rgba(18,18,18,0.95)', color: '#fff', border: '1px solid #f00', borderRadius: '10px',
+      padding: '8px', fontFamily: 'Arial, sans-serif', boxShadow: '0 4px 14px rgba(0,0,0,0.5)'
+    });
+
+    const header = el('div', {}, { display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      marginBottom: '4px' }, [
+      el('strong', { textContent: '🎲 Randomizer' }, { fontSize: '12px' }),
+      el('span', { textContent: get('collapsed') ? '▲' : '▼', onclick: () => { set('collapsed', !get('collapsed')); buildPanel(); } },
+        { cursor: 'pointer', fontSize: '12px', padding: '0 4px' })
+    ]);
+    box.appendChild(header);
+
+    if (!get('collapsed')) {
+      box.appendChild(btn('▶ Go (random mode)', MODES.any, true));
+      box.appendChild(btn('Keyword Mode', MODES.keyword));
+      box.appendChild(btn('File Mode', MODES.file));
+      box.appendChild(btn('Date Mode', MODES.date));
+      box.appendChild(el('hr', {}, { border: 'none', borderTop: '1px solid #444', margin: '6px 0' }));
+      box.appendChild(field('Term', 'term', 'optional', '100px'));
+      box.appendChild(field('Min year', 'minYear', '2005+'));
+      box.appendChild(field('Max year', 'maxYear', 'YYYY'));
+      box.appendChild(check('Long videos (20+ min)', 'long'));
+      box.appendChild(check('Debug (log + toast query)', 'debug'));
+      box.appendChild(check('Fill only (don\'t press search)', 'fillOnly'));
+      box.appendChild(el('div', { textContent: 'Alt+Shift+R hides/shows this panel' },
+        { fontSize: '10px', color: '#aaa', marginTop: '4px' }));
+    }
+    document.body.appendChild(box);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Tampermonkey menu (the "right-click" way: click the TM icon)
+   * ------------------------------------------------------------------ */
+  let menuIds = [];
+  function buildMenu() {
+    if (typeof GM_unregisterMenuCommand === 'function') menuIds.forEach((id) => { try { GM_unregisterMenuCommand(id); } catch (e) {} });
+    menuIds = [];
+    const on = (b) => (b ? 'ON' : 'OFF');
+    const add = (label, fn) => menuIds.push(GM_registerMenuCommand(label, fn));
+
+    add('🎲 Random search (any mode)', MODES.any);
+    add('Keyword Mode search', MODES.keyword);
+    add('File Mode search', MODES.file);
+    add('Date Mode search', MODES.date);
+    add(`Floating buttons: ${on(get('panel'))}`, () => { set('panel', !get('panel')); buildPanel(); buildMenu(); });
+    add(`Home & search pages only: ${on(get('homeOnly'))}`, () => { set('homeOnly', !get('homeOnly')); buildPanel(); buildMenu(); });
+    add(`Debug: ${on(get('debug'))}`, () => { set('debug', !get('debug')); buildPanel(); buildMenu(); });
+    add(`Fill only (no submit): ${on(get('fillOnly'))}`, () => { set('fillOnly', !get('fillOnly')); buildPanel(); buildMenu(); });
+    add(`Long videos: ${on(get('long'))}`, () => { set('long', !get('long')); buildPanel(); buildMenu(); });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Wiring
+   * ------------------------------------------------------------------ */
+  document.addEventListener('keydown', (e) => {
+    if (e.altKey && e.shiftKey && e.code === 'KeyR') {
+      set('panel', !get('panel'));
+      buildPanel();
+      buildMenu();
+    }
+  });
+
+  // YouTube is a single-page app: rebuild the panel after in-page navigation.
+  window.addEventListener('yt-navigate-finish', buildPanel);
+  window.addEventListener('popstate', () => setTimeout(buildPanel, 300));
+
+  buildMenu();
+  buildPanel();
+})();
