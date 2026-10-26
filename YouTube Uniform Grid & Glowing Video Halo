@@ -1,0 +1,786 @@
+// ==UserScript==
+// @name         YouTube Uniform Grid & Glowing Video Halo
+// @namespace    http://tampermonkey.net/
+// @version      1.6
+// @description  Shorts look like normal videos + halo for recent & low-view videos + hide already-seen videos on Home
+// @match        https://www.youtube.com/*
+// @grant        GM_registerMenuCommand
+// @grant        GM_unregisterMenuCommand
+// @run-at       document-end
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    const VERSION = '1.6';
+
+    // ───────────────────────── CONFIG & SETTINGS ─────────────────────────
+    const CONFIG = {
+        lowViewThreshold: 10000,    // fewer views than this => low-views halo (rose)
+        recentHours: 48,            // younger than this many hours => recent halo (cyan). 48 = "1 day ago" and newer
+        scanDelayMs: 200,           // debounce for mutation observer
+        autoRescanIntervalMs: 2500, // automatic periodic rescan interval
+        seenDwellMs: 400,           // a Home card counts as "seen" after this long on screen
+        seenVisibleRatio: 0.4,      // ...with at least this fraction of it visible
+        seenMax: 10000,             // remember at most this many videos (oldest dropped first)
+        haloColors: {
+            recent: '0 0 15px 3px rgba(56, 189, 248, 0.75)',   // cyan
+            lowViews: '0 0 15px 3px rgba(244, 63, 94, 0.75)',  // rose
+            both: '0 0 18px 4px rgba(168, 85, 247, 0.85)'      // violet
+        }
+    };
+
+    const STORE = 'ytHalo.';
+    function load(key, def) {
+        try {
+            const v = localStorage.getItem(STORE + key);
+            return v === null ? def : v === '1';
+        } catch (e) { return def; }
+    }
+    function save(key, val) {
+        try { localStorage.setItem(STORE + key, val ? '1' : '0'); } catch (e) { /* ignore */ }
+    }
+
+    const settings = {
+        shortsUniform: load('shortsUniform', true),
+        autoRescan: load('autoRescan', true),
+        hideSeen: load('hideSeen', true),
+        sortFeed: load('sortFeed', true)
+    };
+
+    const HALO_CLASSES = ['yt-halo-new', 'yt-halo-low-views', 'yt-halo-both'];
+    const HALO_SELECTOR = HALO_CLASSES.map(c => '.' + c).join(',');
+
+    // ───────────────────────── STYLES ─────────────────────────
+    const SHORTS_LOCKUPS = 'ytm-shorts-lockup-view-model, ytm-shorts-lockup-view-model-v2';
+    const U = 'html.yt-halo-uniform ';
+
+    const styleSheet = document.createElement('style');
+    styleSheet.id = 'yt-uniform-halo-style';
+    styleSheet.textContent = `
+        /* Shorts outer styling */
+        ${U}ytd-reel-item-renderer,
+        ${U}ytm-shorts-lockup-view-model,
+        ${U}ytm-shorts-lockup-view-model-v2 {
+            border-radius: 12px !important;
+            transition: transform 0.2s ease, box-shadow 0.3s ease !important;
+        }
+
+        /* Enforce 16:9 aspect ratio across all Shorts lockup variants */
+        ${U}ytd-reel-shelf-renderer #thumbnail,
+        ${U}ytd-rich-shelf-renderer[is-shorts] #thumbnail,
+        ${U}ytd-reel-item-renderer #thumbnail,
+        ${U}ytm-shorts-lockup-view-model,
+        ${U}ytm-shorts-lockup-view-model-v2,
+        ${U}ytm-shorts-lockup-view-model [class*="shortsLockupViewModelHostThumbnail"],
+        ${U}ytm-shorts-lockup-view-model-v2 [class*="shortsLockupViewModelHostThumbnail"],
+        ${U}ytm-shorts-lockup-view-model yt-thumbnail-view-model,
+        ${U}ytm-shorts-lockup-view-model-v2 yt-thumbnail-view-model,
+        ${U}.shortsLockupViewModelHostThumbnailContainer {
+            aspect-ratio: 16 / 9 !important;
+            width: 100% !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            border-radius: 12px !important;
+            overflow: hidden !important;
+        }
+
+        ${U}ytd-reel-shelf-renderer #thumbnail img,
+        ${U}ytd-rich-shelf-renderer[is-shorts] #thumbnail img,
+        ${U}ytd-reel-item-renderer #thumbnail img,
+        ${U}ytm-shorts-lockup-view-model img,
+        ${U}ytm-shorts-lockup-view-model video,
+        ${U}ytm-shorts-lockup-view-model-v2 img,
+        ${U}ytm-shorts-lockup-view-model-v2 video {
+            object-fit: cover !important;
+            object-position: center !important;
+            width: 100% !important;
+            height: 100% !important;
+        }
+
+        /* Grid display for Shorts shelf */
+        ${U}ytd-rich-shelf-renderer[is-shorts] #contents {
+            display: grid !important;
+            grid-template-columns: repeat(var(--ytd-rich-grid-items-per-row, 4), minmax(0, 1fr)) !important;
+            gap: 24px 16px !important;
+            overflow: visible !important;
+            transform: none !important;
+        }
+        ${U}ytd-rich-shelf-renderer[is-shorts] ytd-rich-item-renderer {
+            width: auto !important;
+            max-width: none !important;
+            margin: 0 !important;
+        }
+        ${U}ytd-rich-shelf-renderer[is-shorts] #scroll-container,
+        ${U}ytd-rich-shelf-renderer[is-shorts] #scroll-outer-container {
+            overflow: visible !important;
+            max-width: none !important;
+        }
+        ${U}ytd-rich-shelf-renderer[is-shorts] #left-arrow,
+        ${U}ytd-rich-shelf-renderer[is-shorts] #right-arrow,
+        ${U}ytd-rich-shelf-renderer[is-shorts] #left-arrow-button,
+        ${U}ytd-rich-shelf-renderer[is-shorts] #right-arrow-button {
+            display: none !important;
+        }
+
+        /* Halo styles: cyan = recent, rose = low views, violet = both */
+        .yt-halo-new {
+            box-shadow: ${CONFIG.haloColors.recent} !important;
+            border: 1px solid rgba(56, 189, 248, 0.7) !important;
+        }
+        .yt-halo-low-views {
+            box-shadow: ${CONFIG.haloColors.lowViews} !important;
+            border: 1px solid rgba(244, 63, 94, 0.7) !important;
+        }
+        .yt-halo-both {
+            box-shadow: ${CONFIG.haloColors.both} !important;
+            border: 1px solid rgba(168, 85, 247, 0.8) !important;
+        }
+
+        /* Sorted Home feed: flatten the rows so CSS "order" can reorder across the whole grid */
+        html.yt-halo-sort ytd-browse[page-subtype="home"] ytd-rich-grid-renderer > #contents {
+            display: flex !important;
+            flex-wrap: wrap !important;
+        }
+        html.yt-halo-sort ytd-browse[page-subtype="home"] ytd-rich-grid-row,
+        html.yt-halo-sort ytd-browse[page-subtype="home"] ytd-rich-grid-row > #contents {
+            display: contents !important;
+        }
+
+        /* Already-seen videos on Home */
+        .yt-halo-seen { display: none !important; }
+
+        #yt-halo-toast {
+            position: fixed;
+            bottom: 24px;
+            right: 16px;
+            background: #0f172a;
+            color: #e2e8f0;
+            font-family: system-ui, sans-serif;
+            font-size: 12px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(56, 189, 248, 0.35);
+            z-index: 1000001;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+    `;
+    document.head.appendChild(styleSheet);
+
+    function setShortsUniform(on) {
+        settings.shortsUniform = on;
+        save('shortsUniform', on);
+        document.documentElement.classList.toggle('yt-halo-uniform', on);
+    }
+    setShortsUniform(settings.shortsUniform);
+
+    // ───────────────────────── PARSERS ─────────────────────────
+    // View count. Handles "10K views", "1.1M 2y ago", "245 3d ago", Shorts "30K", lakh/crore, "No views"
+    function parseViews(text) {
+        if (!text) return null;
+        const clean = text.toLowerCase().replace(/,/g, '').trim();
+
+        if (/\bno views?\b/.test(clean)) return 0;
+
+        let m = clean.match(/([\d.]+)\s*(lakh|crore|cr|[kmbl])?\s*views?\b/i);
+
+        if (!m) {
+            m = clean.match(/([\d.]+)\s*(lakh|crore|cr|[kmbl])\s+(?:\d+\s*(?:sec|min|h|d|w|m|y|year|hour|day|week|month)s?\s*ago)/i);
+        }
+        if (!m) {
+            m = clean.match(/\b([\d.]+)\s+(?:\d+\s*(?:sec|min|h|d|w|m|y|year|hour|day|week|month)s?\s*ago)/i);
+        }
+        if (!m) {
+            m = clean.match(/\b([\d.]+)\s*(lakh|crore|cr|[kmbl])\b/i);
+        }
+
+        if (!m) return null;
+
+        const val = parseFloat(m[1]);
+        if (isNaN(val)) return null;
+
+        const unit = (m[2] || '').toLowerCase();
+        let n;
+        switch (unit) {
+            case 'k': n = val * 1e3; break;
+            case 'l':
+            case 'lakh': n = val * 1e5; break;
+            case 'm': n = val * 1e6; break;
+            case 'cr':
+            case 'crore': n = val * 1e7; break;
+            case 'b': n = val * 1e9; break;
+            default: n = val;
+        }
+        return Math.round(n);
+    }
+
+    // Upload age in hours from "3 hours ago", "2 days ago", "5d ago", "Streamed 1 week ago"...
+    function parseAgeHours(text) {
+        if (!text) return null;
+        const m = text.toLowerCase().match(/(\d+(?:\.\d+)?)\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|weeks?|months?|years?|[hdwy])\s*ago/);
+        if (!m) return null;
+        const val = parseFloat(m[1]);
+        const u = m[2];
+        let mult;
+        if (u.startsWith('sec')) mult = 1 / 3600;
+        else if (u.startsWith('mo')) mult = 720;
+        else if (u.startsWith('min')) mult = 1 / 60;
+        else if (u.startsWith('h')) mult = 1;
+        else if (u.startsWith('d')) mult = 24;
+        else if (u.startsWith('w')) mult = 168;
+        else mult = 8760; // years
+        return val * mult;
+    }
+
+    // ───────────────────────── SEEN HISTORY (Home feed) ─────────────────────────
+    const SEEN_KEY = STORE + 'seen';
+    let seenStore = {};   // videoId -> minute timestamp
+    try {
+        const raw = localStorage.getItem(SEEN_KEY);
+        if (raw) seenStore = JSON.parse(raw) || {};
+    } catch (e) { seenStore = {}; }
+
+    // Videos hidden right now = what was already in history when Home was loaded/entered.
+    // (Cards you are looking at this visit never vanish under your cursor.)
+    let snapshot = new Set(Object.keys(seenStore));
+    function refreshSnapshot() { snapshot = new Set(Object.keys(seenStore)); }
+
+    let saveTimer = null;
+    let lastSeenCount = Object.keys(seenStore).length;
+
+    function writeSeen() {
+        try {
+            const raw = localStorage.getItem(SEEN_KEY);
+            if (raw) {
+                const cur = JSON.parse(raw);
+                for (const k in cur) if (!(k in seenStore)) seenStore[k] = cur[k]; // merge other tabs
+            }
+        } catch (e) { /* ignore */ }
+
+        const keys = Object.keys(seenStore);
+        if (keys.length > CONFIG.seenMax) {
+            keys.sort((a, b) => seenStore[a] - seenStore[b])
+                .slice(0, keys.length - CONFIG.seenMax)
+                .forEach(k => { delete seenStore[k]; });
+        }
+        try { localStorage.setItem(SEEN_KEY, JSON.stringify(seenStore)); } catch (e) { /* ignore */ }
+    }
+
+    function persistSeen() {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => {
+            writeSeen();
+            const n = Object.keys(seenStore).length;
+            if (n !== lastSeenCount) { lastSeenCount = n; registerMenus(); }
+        }, 1000);
+    }
+
+    function addSeen(id) {
+        if (!id || seenStore[id]) return;
+        seenStore[id] = Math.floor(Date.now() / 60000);
+        persistSeen();
+    }
+
+    function isHome() { return location.pathname === '/'; }
+
+    function cardVideoId(card) {
+        const a = card.querySelector('a[href*="/watch?v="], a[href*="/shorts/"]');
+        if (!a) return '';
+        const href = a.getAttribute('href') || '';
+        const m = href.match(/[?&]v=([\w-]{11})/) || href.match(/\/shorts\/([\w-]{11})/);
+        return m ? m[1] : '';
+    }
+
+    function currentWatchId() {
+        if (location.pathname === '/watch') return new URLSearchParams(location.search).get('v');
+        const m = location.pathname.match(/^\/shorts\/([\w-]{11})/);
+        return m ? m[1] : null;
+    }
+
+    function recordWatched() {
+        if (!settings.hideSeen) return;
+        const id = currentWatchId();
+        if (id) addSeen(id);
+    }
+
+    // A Home card is "seen" once it has been on screen for a moment
+    const seenTimers = new WeakMap();
+    const observed = new WeakSet();
+    let io = null;
+
+    function markCardSeen(card) {
+        if (!settings.hideSeen || !isHome()) return;
+        if (card.classList.contains('yt-halo-seen')) return;
+        addSeen(cardVideoId(card));
+    }
+
+    function onIntersect(entries) {
+        entries.forEach(en => {
+            const card = en.target;
+            if (en.isIntersecting && en.intersectionRatio >= CONFIG.seenVisibleRatio) {
+                if (seenTimers.has(card)) return;
+                seenTimers.set(card, setTimeout(() => {
+                    seenTimers.delete(card);
+                    markCardSeen(card);
+                }, CONFIG.seenDwellMs));
+            } else {
+                const t = seenTimers.get(card);
+                if (t) { clearTimeout(t); seenTimers.delete(card); }
+            }
+        });
+    }
+
+    if (typeof IntersectionObserver === 'function') {
+        io = new IntersectionObserver(onIntersect, { threshold: [0, CONFIG.seenVisibleRatio] });
+    }
+
+    function applySeenHiding() {
+        if (!settings.hideSeen || !isHome()) return;
+        document.querySelectorAll('ytd-rich-item-renderer').forEach(card => {
+            if (io && !observed.has(card)) { io.observe(card); observed.add(card); }
+            const id = cardVideoId(card);
+            const hide = !!id && snapshot.has(id);
+            if (hide !== card.classList.contains('yt-halo-seen')) card.classList.toggle('yt-halo-seen', hide);
+        });
+    }
+
+    function unhideAll() {
+        document.querySelectorAll('.yt-halo-seen').forEach(el => el.classList.remove('yt-halo-seen'));
+    }
+
+    function setHideSeen(on) {
+        settings.hideSeen = on;
+        save('hideSeen', on);
+        if (on) {
+            refreshSnapshot();
+            recordWatched();
+            scanAndApply();
+        } else {
+            unhideAll();
+        }
+        toast(on ? 'Hide seen videos: ON' : 'Hide seen videos: OFF (history paused)');
+        registerMenus();
+    }
+
+    function clearSeen() {
+        seenStore = {};
+        snapshot = new Set();
+        lastSeenCount = 0;
+        clearTimeout(saveTimer);
+        try { localStorage.removeItem(SEEN_KEY); } catch (e) { /* ignore */ }
+        unhideAll();
+        toast('Seen history cleared');
+        registerMenus();
+    }
+
+    // Another tab cleared the history
+    window.addEventListener('storage', e => {
+        if (e.key === SEEN_KEY && e.newValue === null) {
+            seenStore = {};
+            snapshot = new Set();
+            lastSeenCount = 0;
+            unhideAll();
+        }
+    });
+    window.addEventListener('pagehide', () => {
+        if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; writeSeen(); }
+    });
+
+    // ───────────────────────── SCAN & APPLY HALOS ─────────────────────────
+    const CARD_SELECTOR = [
+        'ytd-rich-item-renderer',
+        'ytd-video-renderer',
+        'ytd-compact-video-renderer',
+        'ytd-grid-video-renderer',
+        'ytd-reel-item-renderer',
+        'ytm-shorts-lockup-view-model',
+        'ytm-shorts-lockup-view-model-v2',
+        'yt-lockup-view-model'
+    ].join(',');
+
+    const OUTER_CARD = 'ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer';
+    const THUMB_SELECTOR = '#thumbnail, yt-thumbnail-view-model, .shortsLockupViewModelHostThumbnailContainer, [class*="shortsLockupViewModelHostThumbnail"]';
+    const META_SELECTOR = [
+        '#metadata-line',
+        '.inline-metadata-item',
+        'yt-content-metadata-view-model',
+        '.ytd-video-meta-block',
+        '.shortsLockupViewModelHostMetadataSubhead',
+        '.shortsLockupViewModelHostOutsideMetadata'
+    ].join(',');
+    const TITLE_SELECTOR = '#video-title, #video-title-link, .shortsLockupViewModelHostMetadataTitle, .yt-lockup-metadata-view-model-wiz__title, h3';
+
+    let stats = { processed: 0, haloRecent: 0, haloLowView: 0, hidden: 0 };
+    const info = new WeakMap();
+
+    function clearHalo(card) {
+        card.querySelectorAll(HALO_SELECTOR).forEach(el => el.classList.remove(...HALO_CLASSES));
+        card.classList.remove(...HALO_CLASSES);
+    }
+
+    function scanAndApply() {
+        applySeenHiding();
+
+        document.querySelectorAll(CARD_SELECTOR).forEach(card => {
+            if (!card.matches(OUTER_CARD) && card.parentElement && card.parentElement.closest(OUTER_CARD)) {
+                return;
+            }
+
+            const link = card.querySelector('a[href*="/watch"], a[href*="/shorts/"]');
+            const sig = link ? link.getAttribute('href') : '';
+
+            if (sig && card.dataset.haloApplied === sig) return;
+
+            const isShort =
+                card.matches('ytd-reel-item-renderer, ' + SHORTS_LOCKUPS) ||
+                !!card.querySelector(SHORTS_LOCKUPS) ||
+                sig.includes('/shorts/');
+
+            const targetBox = card.querySelector(THUMB_SELECTOR) || card;
+
+            // "New" badge (YouTube's own label)
+            const hasNewBadge = Array.from(
+                card.querySelectorAll('.badge, ytd-badge-supported-renderer, .badge-shape-wiz__text, #text')
+            ).some(el => el.textContent.trim().toLowerCase() === 'new');
+
+            // View count + upload age from the metadata line
+            let viewCount = null;
+            let metaText = '';
+            let allMeta = '';
+
+            const metaNodes = card.querySelectorAll(META_SELECTOR);
+            metaNodes.forEach(node => {
+                const txt = node.innerText || node.textContent || '';
+                allMeta += ' ' + txt;
+                if (!metaText) metaText = txt;
+                const parsed = parseViews(txt);
+                if (parsed !== null && viewCount === null) viewCount = parsed;
+            });
+
+            let ageText = allMeta;
+            if (viewCount === null || metaNodes.length === 0) {
+                const fallbackText = card.innerText || card.textContent || '';
+                if (viewCount === null) viewCount = parseViews(fallbackText);
+                if (!metaText) metaText = fallbackText.slice(0, 80);
+                if (metaNodes.length === 0) ageText = fallbackText;
+            }
+
+            const ageHours = parseAgeHours(ageText);
+            const isRecent = hasNewBadge || (ageHours !== null && ageHours < CONFIG.recentHours);
+            const isLowView = viewCount !== null && viewCount < CONFIG.lowViewThreshold;
+
+            clearHalo(card);
+            let halo = 'none';
+            if (isRecent && isLowView) { halo = 'both'; targetBox.classList.add('yt-halo-both'); }
+            else if (isRecent) { halo = 'recent'; targetBox.classList.add('yt-halo-new'); }
+            else if (isLowView) { halo = 'low-views'; targetBox.classList.add('yt-halo-low-views'); }
+
+            const titleEl = card.querySelector(TITLE_SELECTOR);
+            info.set(card, {
+                kind: isShort ? 'short' : 'video',
+                views: viewCount,
+                ageHours: ageHours,
+                isNew: hasNewBadge,
+                halo: halo,
+                thumb: targetBox,
+                title: ((titleEl && titleEl.textContent) || '').trim().replace(/\s+/g, ' ').slice(0, 60),
+                meta: metaText.trim().replace(/\s+/g, ' ').slice(0, 60)
+            });
+
+            if (sig && (viewCount !== null || isRecent)) {
+                card.dataset.haloApplied = sig;
+            } else {
+                delete card.dataset.haloApplied;
+            }
+        });
+
+        sortHome();
+
+        stats.processed = document.querySelectorAll('[data-halo-applied]').length;
+        stats.haloRecent = document.querySelectorAll('.yt-halo-new, .yt-halo-both').length;
+        stats.haloLowView = document.querySelectorAll('.yt-halo-low-views, .yt-halo-both').length;
+        stats.hidden = document.querySelectorAll('.yt-halo-seen').length;
+    }
+
+    // ───────────────────────── SORT HOME FEED ─────────────────────────
+    // Order: 1) low-view videos, fewest views first
+    //        2) recently uploaded videos, newest first
+    //        3) everything else, in YouTube's own order
+    // Uses CSS "order" only (the DOM is never reshuffled, so YouTube keeps working).
+    function setOrder(el, n) {
+        const v = String(n);
+        if (el.style.order !== v) el.style.order = v;
+        el.dataset.haloSorted = '1';
+    }
+
+    function unsortAll() {
+        document.querySelectorAll('[data-halo-sorted]').forEach(el => {
+            el.style.order = '';
+            delete el.dataset.haloSorted;
+        });
+    }
+
+    function sortHome() {
+        if (!settings.sortFeed || !isHome()) return;
+        const container = document.querySelector('ytd-browse[page-subtype="home"] ytd-rich-grid-renderer > #contents');
+        if (!container) return;
+
+        // Flex items: rows are display:contents, so their children are the real items
+        const items = [];
+        Array.from(container.children).forEach(ch => {
+            if (ch.localName === 'ytd-rich-grid-row') {
+                const inner = Array.from(ch.children).find(c => c.id === 'contents') || ch;
+                Array.from(inner.children).forEach(x => items.push(x));
+            } else {
+                items.push(ch);
+            }
+        });
+
+        const rows = [];
+        items.forEach((el, idx) => {
+            if (el.classList.contains('yt-halo-seen')) return;
+            if (el.localName === 'ytd-continuation-item-renderer') { setOrder(el, 1000000); return; } // keep infinite-scroll trigger last
+            const i = el.localName === 'ytd-rich-item-renderer' ? info.get(el) : null;
+            let tier = 2;
+            if (i) {
+                if (i.halo === 'low-views' || i.halo === 'both') tier = 0;
+                else if (i.halo === 'recent') tier = 1;
+            }
+            rows.push({
+                el: el, idx: idx, tier: tier,
+                views: i && i.views !== null ? i.views : Infinity,
+                age: i && i.ageHours !== null ? i.ageHours : Infinity
+            });
+        });
+
+        rows.sort((a, b) => {
+            if (a.tier !== b.tier) return a.tier - b.tier;
+            if (a.tier === 0) return (a.views - b.views) || (a.age - b.age) || (a.idx - b.idx);
+            if (a.tier === 1) return (a.age - b.age) || (a.views - b.views) || (a.idx - b.idx);
+            return a.idx - b.idx;
+        });
+        rows.forEach((r, n) => setOrder(r.el, n + 1));
+    }
+
+    function setSortFeed(on) {
+        settings.sortFeed = on;
+        save('sortFeed', on);
+        document.documentElement.classList.toggle('yt-halo-sort', on);
+        if (on) scanAndApply(); else unsortAll();
+        toast(on ? 'Sort Home (low views → newest): ON' : 'Sort Home: OFF');
+        registerMenus();
+    }
+    document.documentElement.classList.toggle('yt-halo-sort', settings.sortFeed);
+
+    function forceRescan() {
+        document.querySelectorAll('[data-halo-applied]').forEach(e => delete e.dataset.haloApplied);
+        scanAndApply();
+    }
+
+    // ───────────────────────── DEBUG REPORT (Tampermonkey menu → Copy debug report) ─────────────────────────
+    function buildReport() {
+        const L = [];
+        L.push('=== YouTube Halo debug report ===');
+        L.push('Version: ' + VERSION + ' | Time: ' + new Date().toISOString());
+        L.push('URL: ' + location.href);
+        L.push('Auto-Rescan: ' + (settings.autoRescan ? 'on' : 'off') +
+            ' | Shorts uniform: ' + (settings.shortsUniform ? 'on' : 'off') +
+            ' | Low-view < ' + CONFIG.lowViewThreshold + ' | Recent < ' + CONFIG.recentHours + 'h');
+        L.push('Sort Home: ' + (settings.sortFeed ? 'on' : 'off'));
+        L.push('Hide seen: ' + (settings.hideSeen ? 'on' : 'off') +
+            ' | History: ' + Object.keys(seenStore).length + ' videos | Hidden now: ' + stats.hidden);
+        L.push('Scanned: ' + stats.processed + ' | Recent: ' + stats.haloRecent + ' | Low View: ' + stats.haloLowView);
+
+        const cards = Array.from(document.querySelectorAll(CARD_SELECTOR));
+        const byTag = {};
+        let unknown = 0, shorts = 0, shortsOk = 0;
+        const rows = [];
+
+        cards.forEach(card => {
+            byTag[card.localName] = (byTag[card.localName] || 0) + 1;
+            const i = info.get(card);
+            if (!i) return;
+            if (i.views === null) unknown++;
+
+            let ratio = 'n/a', ok = false;
+            const r = i.thumb && i.thumb.getBoundingClientRect ? i.thumb.getBoundingClientRect() : null;
+            if (r && r.height > 0) {
+                const rv = r.width / r.height;
+                ratio = Math.round(r.width) + 'x' + Math.round(r.height) + ' (' + rv.toFixed(2) + ')';
+                ok = rv > 1.65 && rv < 1.9;
+            }
+            if (i.kind === 'short') { shorts++; if (ok) shortsOk++; }
+
+            rows.push(
+                i.kind.padEnd(5) + ' <' + card.localName + '> views=' + (i.views === null ? '?' : i.views) +
+                ' age=' + (i.ageHours === null ? '?' : (i.ageHours < 48 ? i.ageHours.toFixed(1) + 'h' : Math.round(i.ageHours / 24) + 'd')) +
+                ' badge=' + (i.isNew ? 'Y' : 'N') + ' halo=' + i.halo + ' order=' + (card.style.order || '-') +
+                (card.classList.contains('yt-halo-seen') ? ' HIDDEN(seen)' : '') +
+                ' thumb=' + ratio + (i.kind === 'short' ? (ok ? ' 16:9 OK' : ' NOT 16:9') : '') +
+                ' "' + i.title + '"' + (i.views === null ? ' meta="' + i.meta + '"' : '')
+            );
+        });
+
+        L.push('Cards by tag: ' + Object.keys(byTag).map(k => k + '=' + byTag[k]).join(', '));
+        L.push('Unknown view count: ' + unknown);
+        L.push('Shorts: ' + shorts + ' (16:9 thumbnails: ' + shortsOk + '/' + shorts + ')');
+        L.push('--- cards preview (first 150) ---');
+        rows.slice(0, 150).forEach(r => L.push(r));
+        return L.join('\n');
+    }
+
+    // ───────────────────────── TOAST / CLIPBOARD (no innerHTML: Trusted Types) ─────────────────────────
+    let root = null, toastEl = null, toastTimer = null;
+
+    function ensureRoot() {
+        if (!root || !root.isConnected) {
+            root = document.createElement('div');
+            root.id = 'yt-halo-root';
+            (document.body || document.documentElement).appendChild(root);
+        }
+        return root;
+    }
+
+    function toast(msg) {
+        ensureRoot();
+        if (!toastEl || !toastEl.isConnected) {
+            toastEl = document.createElement('div');
+            toastEl.id = 'yt-halo-toast';
+            root.appendChild(toastEl);
+        }
+        toastEl.textContent = msg;
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => {
+            if (toastEl) { toastEl.remove(); toastEl = null; }
+        }, 2200);
+    }
+
+    function copyText(text) {
+        function fallback() {
+            try {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.cssText = 'position:fixed;left:-9999px;top:0;';
+                ensureRoot().appendChild(ta);
+                ta.select();
+                const ok = document.execCommand('copy');
+                ta.remove();
+                toast(ok ? '✔ Debug report copied' : '✖ Copy failed');
+            } catch (e) {
+                toast('✖ Copy failed');
+            }
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(() => toast('✔ Debug report copied'), fallback);
+        } else {
+            fallback();
+        }
+    }
+
+    function copyReport() { copyText(buildReport()); }
+
+    function setAutoRescan(on) {
+        settings.autoRescan = on;
+        save('autoRescan', on);
+        toast(on ? 'Auto-rescan: ON' : 'Auto-rescan: OFF');
+        registerMenus();
+    }
+
+    function toggleShortsUniform() {
+        setShortsUniform(!settings.shortsUniform);
+        toast(settings.shortsUniform ? 'Shorts look like videos: ON' : 'Shorts look like videos: OFF');
+        registerMenus();
+    }
+
+    // ───────────────────────── MENU (Tampermonkey icon → this script) ─────────────────────────
+    let menuIds = [];
+    function registerMenus() {
+        if (typeof GM_registerMenuCommand !== 'function') return;
+        if (typeof GM_unregisterMenuCommand === 'function') {
+            menuIds.forEach(id => { try { GM_unregisterMenuCommand(id); } catch (e) { /* ignore */ } });
+        }
+        menuIds = [];
+        const add = (label, fn) => {
+            try { menuIds.push(GM_registerMenuCommand(label, fn)); } catch (e) { /* ignore */ }
+        };
+        add((settings.hideSeen ? '✅' : '⬜') + ' Hide seen videos on Home (Alt+Shift+H)', () => setHideSeen(!settings.hideSeen));
+        add('🗑️ Clear seen history (' + Object.keys(seenStore).length + ' videos)', clearSeen);
+        add((settings.sortFeed ? '✅' : '⬜') + ' Sort Home: low views, then newest (Alt+Shift+S)', () => setSortFeed(!settings.sortFeed));
+        add((settings.shortsUniform ? '✅' : '⬜') + ' Shorts look like normal videos', toggleShortsUniform);
+        add((settings.autoRescan ? '✅' : '⬜') + ' Auto re-scan', () => setAutoRescan(!settings.autoRescan));
+        add('📋 Copy debug report', copyReport);
+    }
+    registerMenus();
+
+    document.addEventListener('keydown', e => {
+        if (e.altKey && e.shiftKey && (e.key === 'H' || e.key === 'h')) {
+            e.preventDefault();
+            setHideSeen(!settings.hideSeen);
+        }
+        if (e.altKey && e.shiftKey && (e.key === 'S' || e.key === 's')) {
+            e.preventDefault();
+            setSortFeed(!settings.sortFeed);
+        }
+    });
+
+    // ───────────────────────── AUTO RESCAN ENGINE ─────────────────────────
+    let scanTimer = null;
+    function scheduleScan() {
+        if (scanTimer) return;
+        scanTimer = setTimeout(() => {
+            scanTimer = null;
+            scanAndApply();
+        }, CONFIG.scanDelayMs);
+    }
+
+    const observer = new MutationObserver(mutations => {
+        if (root && mutations.every(m => root.contains(m.target))) return;
+        scheduleScan();
+    });
+
+    setInterval(() => {
+        if (!settings.autoRescan) return;
+        const unparsed = document.querySelectorAll(`${CARD_SELECTOR}:not([data-halo-applied])`).length;
+        if (unparsed > 0) scanAndApply();
+    }, CONFIG.autoRescanIntervalMs);
+
+    let scrollThrottle = false;
+    window.addEventListener('scroll', () => {
+        if (!scrollThrottle) {
+            scrollThrottle = true;
+            setTimeout(() => {
+                scrollThrottle = false;
+                scheduleScan();
+            }, 400);
+        }
+    }, { passive: true });
+
+    let lastNav = 0;
+    function onNavigate() {
+        const now = Date.now();
+        if (now - lastNav < 300) return; // fired on both window and document
+        lastNav = now;
+        recordWatched();
+        if (isHome() && settings.hideSeen) refreshSnapshot();
+        setTimeout(forceRescan, 500);
+    }
+
+    function init() {
+        if (!document.body) {
+            window.requestAnimationFrame(init);
+            return;
+        }
+        observer.observe(document.body, { childList: true, subtree: true });
+        window.addEventListener('yt-navigate-finish', onNavigate);
+        document.addEventListener('yt-navigate-finish', onNavigate);
+        recordWatched();
+        scanAndApply();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+})();
