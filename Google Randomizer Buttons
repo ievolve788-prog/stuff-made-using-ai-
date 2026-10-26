@@ -1,0 +1,315 @@
+// ==UserScript==
+// @name         Google Randomizer Buttons
+// @namespace    local.google.randomizer
+// @version      1.0.0
+// @description  Adds toggleable buttons / menu commands that type a random query with a random date range into Google's search bar and press search.
+// @match        https://www.google.com/*
+// @match        https://www.google.co.in/*
+// @match        https://www.google.co.uk/*
+// @match        https://www.google.ca/*
+// @match        https://www.google.com.au/*
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_registerMenuCommand
+// @grant        GM_unregisterMenuCommand
+// @run-at       document-idle
+// ==/UserScript==
+
+(function () {
+  'use strict';
+
+  /* ------------------------------------------------------------------ *
+   * Settings (persisted with Tampermonkey storage)
+   * ------------------------------------------------------------------ */
+  const DEFAULTS = {
+    panel: true,       // show floating button panel
+    homeOnly: true,    // show panel only on Google home and search results pages
+    debug: false,      // log + toast the generated query
+    fillOnly: false,   // type the query into the search bar but don't press search
+    useTbs: false,     // use Google's Tools > Custom date range (URL) instead of after:/before: operators
+    collapsed: false,  // panel collapsed to a small pill
+    minYear: '',       // optional min year (1995+)
+    maxYear: '',       // optional max year
+    window: '30',      // size of the random date window in days
+    term: ''           // optional search term (blank = random word)
+  };
+  const get = (k) => GM_getValue(k, DEFAULTS[k]);
+  const set = (k, v) => GM_setValue(k, v);
+
+  /* ------------------------------------------------------------------ *
+   * Date helpers (local time)
+   * ------------------------------------------------------------------ */
+  const pad = (n) => String(n).padStart(2, '0');
+  const fmt = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const fmtUS = (d) => `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`; // for tbs=cdr
+  const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+  const randBetween = (a, b) => new Date(a.getTime() + Math.random() * (b.getTime() - a.getTime()));
+  const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+  function dateRange() {
+    let min = new Date(1995, 0, 1);
+    let max = new Date();
+    const a = parseInt(get('minYear'), 10);
+    const b = parseInt(get('maxYear'), 10);
+    if (a >= 1990) min = new Date(a, 0, 1);
+    if (b >= 1990) { const e = new Date(b, 11, 31); if (e < max) max = e; }
+    if (min > max) [min, max] = [max, min];
+    return { min, max };
+  }
+
+  function windowDays() {
+    const n = parseInt(get('window'), 10);
+    return n > 0 ? n : 30;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Query builders
+   * Each returns { text, from, to } - from/to are Date objects (or null)
+   * ------------------------------------------------------------------ */
+  // Add more words here.
+  const WORDS = ['abandoned','accident','acoustic','adventure','airport','album','ancient','animal','anniversary',
+    'apartment','arcade','army','attic','audition','autumn','bakery','balloon','band','barbecue','baseball','basement',
+    'beach','bicycle','birthday','boat','bonfire','bridge','bus','cabin','camera','camp','candle','carnival','cartoon',
+    'castle','cat','ceremony','chess','childhood','christmas','church','circus','city','classroom','clock','coffee',
+    'comedy','computer','concert','cooking','costume','crash','dance','dinner','dog','dragon','dream','drum','eclipse',
+    'elephant','engine','experiment','factory','family','farm','festival','fireworks','fishing','flood','football',
+    'forest','friends','garage','garden','ghost','graduation','guitar','halloween','harbor','helicopter','highway',
+    'hiking','holiday','horse','hospital','house','island','jungle','kitchen','lake','laptop','lecture','library',
+    'lighthouse','magic','market','marathon','mountain','museum','music','night','ocean','orchestra','painting',
+    'parade','party','piano','picnic','pizza','playground','rain','recipe','recital','road','robot','rocket','sailing',
+    'school','science','skateboard','snow','soccer','storm','street','summer','sunset','swimming','teacher','theater',
+    'thunder','train','travel','tree','vacation','village','wedding','winter','workshop','zoo'];
+
+  const SHORT_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const FULL_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const q = (s) => `"${s}"`;
+
+  // Keyword mode: random word (or your term) + random date window.
+  function keywordQuery() {
+    const { min, max } = dateRange();
+    const term = (get('term') || '').trim() || pick(WORDS);
+    const to = randBetween(min, max);
+    let from = addDays(to, -windowDays());
+    if (from < min) from = min;
+    return { text: term, from, to };
+  }
+
+  // Date mode: text dates like "Aug 28" / "28/8" matched against a random day window.
+  function dateQuery() {
+    const { min, max } = dateRange();
+    const term = (get('term') || '').trim();
+    const d = randBetween(min, max);
+    const day = d.getDate(), m = d.getMonth();
+    const forms = [
+      `${SHORT_MONTHS[m]} ${day}`, `${FULL_MONTHS[m]} ${day}`, `${m + 1}/${day}`,
+      `${day} ${SHORT_MONTHS[m]}`, `${day} ${FULL_MONTHS[m]}`
+    ].map(q);
+    const text = `${term ? term + ' ' : ''}(${forms.join(' OR ')})`;
+    return { text, from: addDays(d, -3), to: addDays(d, 3) };
+  }
+
+  // Forum/blog mode: random word restricted to personal-page style results.
+  function oldWebQuery() {
+    const { min, max } = dateRange();
+    const term = (get('term') || '').trim() || pick(WORDS);
+    const flavor = pick(['forum', 'blog', 'guestbook', '"my homepage"', '"posted by"', '"thread"']);
+    const to = randBetween(min, max);
+    let from = addDays(to, -windowDays());
+    if (from < min) from = min;
+    return { text: `${term} ${flavor}`, from, to };
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Submitting to Google
+   * ------------------------------------------------------------------ */
+  function buildUrl(parts) {
+    const url = new URL('/search', location.origin);
+    if (get('useTbs')) {
+      url.searchParams.set('q', parts.text);
+      url.searchParams.set('tbs', `cdr:1,cd_min:${fmtUS(parts.from)},cd_max:${fmtUS(parts.to)}`);
+    } else {
+      url.searchParams.set('q', `${parts.text} after:${fmt(parts.from)} before:${fmt(parts.to)}`);
+    }
+    return url.toString();
+  }
+
+  function submit(parts, modeName) {
+    const fullQuery = get('useTbs') ? parts.text
+      : `${parts.text} after:${fmt(parts.from)} before:${fmt(parts.to)}`;
+
+    if (get('debug')) {
+      console.log(`[Google Randomizer] ${modeName}:`, fullQuery, get('useTbs') ? `(tbs ${fmtUS(parts.from)} - ${fmtUS(parts.to)})` : '');
+      toast(`${modeName}: ${fullQuery}${get('useTbs') ? `  [${fmtUS(parts.from)} - ${fmtUS(parts.to)}]` : ''}`);
+    }
+
+    const input = document.querySelector('textarea[name="q"]') || document.querySelector('input[name="q"]');
+    if (!input) { location.href = buildUrl(parts); return; }
+
+    // Type the query into the search bar.
+    input.focus();
+    const proto = input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, 'value').set.call(input, fullQuery);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+
+    if (get('fillOnly')) return;
+
+    // Custom date range can't be set from the search bar, so go through the URL.
+    if (get('useTbs')) { setTimeout(() => { location.href = buildUrl(parts); }, 200); return; }
+
+    setTimeout(() => {
+      const form = input.closest('form');
+      const submitBtn = form && (form.querySelector('button[type="submit"]') ||
+                                 form.querySelector('button[aria-label="Search"]') ||
+                                 form.querySelector('input[name="btnK"]'));
+      if (submitBtn) submitBtn.click();
+      else if (form && form.requestSubmit) form.requestSubmit();
+      else if (form) form.submit();
+      else location.href = buildUrl(parts);
+    }, 200);
+  }
+
+  const MODES = {
+    keyword: () => submit(keywordQuery(), 'Keyword'),
+    date: () => submit(dateQuery(), 'Date'),
+    oldweb: () => submit(oldWebQuery(), 'Forum/Blog'),
+    any: () => pick([MODES.keyword, MODES.date, MODES.oldweb])()
+  };
+
+  /* ------------------------------------------------------------------ *
+   * Tiny DOM helpers (no innerHTML - Trusted Types safe)
+   * ------------------------------------------------------------------ */
+  function el(tag, props = {}, style = {}, children = []) {
+    const n = document.createElement(tag);
+    Object.assign(n, props);
+    Object.assign(n.style, style);
+    children.forEach((c) => n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c));
+    return n;
+  }
+
+  let toastEl = null, toastTimer = null;
+  function toast(msg) {
+    if (!toastEl) {
+      toastEl = el('div', {}, {
+        position: 'fixed', left: '50%', bottom: '24px', transform: 'translateX(-50%)', maxWidth: '80vw',
+        background: '#111', color: '#fff', padding: '8px 14px', borderRadius: '8px', fontSize: '12px',
+        fontFamily: 'monospace', zIndex: 2147483647, wordBreak: 'break-all', border: '1px solid #4285f4'
+      });
+      document.body.appendChild(toastEl);
+    }
+    toastEl.textContent = msg;
+    toastEl.style.display = 'block';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toastEl.style.display = 'none'; }, 6000);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Floating panel
+   * ------------------------------------------------------------------ */
+  const PANEL_ID = 'google-randomizer-panel';
+  const ACCENT = '#4285f4';
+
+  function isAllowedPage() {
+    return location.pathname === '/' || location.pathname === '/search' || location.pathname === '/webhp';
+  }
+
+  function btn(label, onClick, primary) {
+    return el('button', { textContent: label, onclick: onClick, type: 'button' }, {
+      cursor: 'pointer', padding: '6px 10px', margin: '2px 0', width: '100%', borderRadius: '6px',
+      border: primary ? 'none' : `1px solid ${ACCENT}`, background: primary ? ACCENT : 'transparent',
+      color: '#fff', fontSize: '12px', fontWeight: 'bold'
+    });
+  }
+
+  function field(label, key, placeholder, width) {
+    const input = el('input', { type: 'text', placeholder, value: get(key) }, {
+      width: width || '70px', background: '#222', color: '#fff', border: '1px solid #555',
+      borderRadius: '4px', padding: '3px 5px', fontSize: '12px'
+    });
+    input.addEventListener('input', () => set(key, input.value.trim()));
+    return el('label', {}, { display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      gap: '6px', fontSize: '11px', margin: '3px 0' }, [label, input]);
+  }
+
+  function check(label, key, after) {
+    const cb = el('input', { type: 'checkbox', checked: !!get(key) });
+    cb.addEventListener('change', () => { set(key, cb.checked); if (after) after(); });
+    return el('label', {}, { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', margin: '2px 0' },
+      [cb, label]);
+  }
+
+  function buildPanel() {
+    const old = document.getElementById(PANEL_ID);
+    if (old) old.remove();
+    if (!get('panel')) return;
+    if (get('homeOnly') && !isAllowedPage()) return;
+
+    const box = el('div', { id: PANEL_ID }, {
+      position: 'fixed', right: '16px', bottom: '16px', zIndex: 2147483646, width: '200px',
+      background: 'rgba(18,18,18,0.95)', color: '#fff', border: `1px solid ${ACCENT}`, borderRadius: '10px',
+      padding: '8px', fontFamily: 'Arial, sans-serif', boxShadow: '0 4px 14px rgba(0,0,0,0.5)'
+    });
+
+    box.appendChild(el('div', {}, { display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      marginBottom: '4px' }, [
+      el('strong', { textContent: '🎲 Randomizer' }, { fontSize: '12px' }),
+      el('span', { textContent: get('collapsed') ? '▲' : '▼',
+        onclick: () => { set('collapsed', !get('collapsed')); buildPanel(); } },
+        { cursor: 'pointer', fontSize: '12px', padding: '0 4px' })
+    ]));
+
+    if (!get('collapsed')) {
+      box.appendChild(btn('▶ Go (random mode)', MODES.any, true));
+      box.appendChild(btn('Keyword Mode', MODES.keyword));
+      box.appendChild(btn('Date Mode', MODES.date));
+      box.appendChild(btn('Forum / Blog Mode', MODES.oldweb));
+      box.appendChild(el('hr', {}, { border: 'none', borderTop: '1px solid #444', margin: '6px 0' }));
+      box.appendChild(field('Term', 'term', 'optional', '100px'));
+      box.appendChild(field('Min year', 'minYear', '1995+'));
+      box.appendChild(field('Max year', 'maxYear', 'YYYY'));
+      box.appendChild(field('Window (days)', 'window', '30'));
+      box.appendChild(check('Use Tools date range (URL)', 'useTbs'));
+      box.appendChild(check('Debug (log + toast query)', 'debug'));
+      box.appendChild(check('Fill only (don\'t press search)', 'fillOnly'));
+      box.appendChild(el('div', { textContent: 'Alt+Shift+R hides/shows this panel' },
+        { fontSize: '10px', color: '#aaa', marginTop: '4px' }));
+    }
+    document.body.appendChild(box);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Tampermonkey menu (click the Tampermonkey icon)
+   * ------------------------------------------------------------------ */
+  let menuIds = [];
+  function buildMenu() {
+    if (typeof GM_unregisterMenuCommand === 'function') menuIds.forEach((id) => { try { GM_unregisterMenuCommand(id); } catch (e) {} });
+    menuIds = [];
+    const on = (b) => (b ? 'ON' : 'OFF');
+    const add = (label, fn) => menuIds.push(GM_registerMenuCommand(label, fn));
+    const toggle = (key) => () => { set(key, !get(key)); buildPanel(); buildMenu(); };
+
+    add('🎲 Random search (any mode)', MODES.any);
+    add('Keyword Mode search', MODES.keyword);
+    add('Date Mode search', MODES.date);
+    add('Forum / Blog Mode search', MODES.oldweb);
+    add(`Floating buttons: ${on(get('panel'))}`, toggle('panel'));
+    add(`Home & search pages only: ${on(get('homeOnly'))}`, toggle('homeOnly'));
+    add(`Debug: ${on(get('debug'))}`, toggle('debug'));
+    add(`Fill only (no submit): ${on(get('fillOnly'))}`, toggle('fillOnly'));
+    add(`Use Tools date range (URL): ${on(get('useTbs'))}`, toggle('useTbs'));
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Wiring
+   * ------------------------------------------------------------------ */
+  document.addEventListener('keydown', (e) => {
+    if (e.altKey && e.shiftKey && e.code === 'KeyR') {
+      set('panel', !get('panel'));
+      buildPanel();
+      buildMenu();
+    }
+  });
+
+  buildMenu();
+  buildPanel();
+})();
