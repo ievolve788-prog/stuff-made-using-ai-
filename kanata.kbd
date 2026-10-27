@@ -1,10 +1,11 @@
+ 
 (defcfg
   process-unmapped-keys yes
   concurrent-tap-hold yes
 )
 
 (defsrc
-  lctl lsft lmet lalt ralt rctl rsft caps c s d f e j k l , u i o pgdn mwu mwd mlft mrgt
+  lctl lsft lmet lalt ralt rctl rsft caps spc c s d f e h j k l , u i o pgdn mwu mwd mlft mrgt
 )
 
 (defvar
@@ -39,6 +40,10 @@
   td-rctl (tap-dance-eager $tap-time (@os-rctl @lock-rctl))
   td-rsft (tap-dance-eager $tap-time (@os-rsft @lock-rsft))
 
+  ;; --- Spacebar Action ---
+  ;; Tap = Space, Hold = Mouse / Navigation Layer
+  spc-mouse (tap-hold 150 200 spc (layer-toggle mouse))
+
   ;; --- Toggle Normal / Passthrough Layer ---
   toggle-passthrough (switch
     ((base-layer passthrough)) (layer-switch base) break
@@ -55,34 +60,30 @@
     () pgdn break
   )
 
-  ;; --- Right Alt Action ---
-  ;; Single Tap = Right Click (mrgt)
-  ;; Double Tap = Middle Click (mmid)
-  ;; Hold = Toggle Volume Control Layer
-  td-ralt-click (tap-dance $tap-time (mrgt mmid))
-  ralt-vol (tap-hold-press $tap-time $tap-time @td-ralt-click (layer-toggle volume))
-
   ;; --- Right Ctrl Action ---
-  ;; Single Tap = Copy (C-c)
-  ;; Double Tap = Paste (C-v)
-  ;; Hold = Cut (C-x)
-  td-rctl-clip (tap-dance $tap-time (C-c C-v))
-  rctl-clip (tap-hold-press $tap-time $tap-time @td-rctl-clip C-x)
+  ;; Single Tap = Paste (C-v)
+  ;; Hold = Toggle Volume Layer (Scroll wheel adjusts volume)
+  rctl-vol (tap-hold-press $tap-time $tap-time C-v (layer-toggle volume))
 )
 
 ;; Primary Base Layer
 (deflayer base
-  @td-lctl @td-lsft @td-lmet @td-lalt @ralt-vol @rctl-clip @td-rsft mlft c s d f e j k l , u i o @pgdn-action mwu mwd mlft mrgt
+  @td-lctl @td-lsft @td-lmet @td-lalt @td-ralt @rctl-vol @td-rsft mlft @spc-mouse c s d f e h j k l , u i o @pgdn-action mwu mwd mlft mrgt
 )
 
-;; Dedicated Volume Control Layer (Active ONLY while holding Right Alt)
+;; Dedicated Mouse &amp; Navigation Layer (Active ONLY while holding Spacebar)
+(deflayer mouse
+  _ _ _ _ _ _ _ _ _ mwd mlft mrgt _ mwu left down up rght _ _ _ _ _ _ _ _ _
+)
+
+;; Dedicated Volume Control Layer (Active ONLY while holding Right Ctrl)
 (deflayer volume
-  _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ volu voldwn _ _
+  _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ volu voldwn _ _
 )
 
 ;; 100% Normal Keyboard Layer (Zero Kanata Remappings / Pure Passthrough)
 (deflayer passthrough
-  lctl lsft lmet lalt ralt rctl rsft caps c s d f e j k l , u i o pgdn mwu mwd mlft mrgt
+  lctl lsft lmet lalt ralt rctl rsft caps spc c s d f e h j k l , u i o pgdn mwu mwd mlft mrgt
 )
 
 (defvirtualkeys
@@ -102,3 +103,4 @@
   ;; Press U + I + O simultaneously to toggle Normal Passthrough Mode ON/OFF
   (u i o) @toggle-passthrough 200 first-release ()
 )
+ 
