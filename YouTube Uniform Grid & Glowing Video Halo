@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Uniform Grid & Glowing Video Halo
 // @namespace    http://tampermonkey.net/
-// @version      1.6
+// @version      1.7
 // @description  Shorts look like normal videos + halo for recent & low-view videos + hide already-seen videos on Home
 // @match        https://www.youtube.com/*
 // @grant        GM_registerMenuCommand
@@ -12,7 +12,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '1.6';
+    const VERSION = '1.7';
 
     // ───────────────────────── CONFIG & SETTINGS ─────────────────────────
     const CONFIG = {
@@ -45,7 +45,8 @@
         shortsUniform: load('shortsUniform', true),
         autoRescan: load('autoRescan', true),
         hideSeen: load('hideSeen', true),
-        sortFeed: load('sortFeed', true)
+        sortFeed: load('sortFeed', true),
+        recentOnly: load('recentOnly', false)
     };
 
     const HALO_CLASSES = ['yt-halo-new', 'yt-halo-low-views', 'yt-halo-both'];
@@ -150,6 +151,9 @@
 
         /* Already-seen videos on Home */
         .yt-halo-seen { display: none !important; }
+
+        /* "Recent only" mode: videos that are not recent */
+        .yt-halo-old { display: none !important; }
 
         #yt-halo-toast {
             position: fixed;
@@ -283,6 +287,7 @@
     }
 
     function isHome() { return location.pathname === '/'; }
+    function isFeedPage() { return location.pathname === '/' || location.pathname === '/results'; } // Home + search
 
     function cardVideoId(card) {
         const a = card.querySelector('a[href*="/watch?v="], a[href*="/shorts/"]');
@@ -488,6 +493,12 @@
                 meta: metaText.trim().replace(/\s+/g, ' ').slice(0, 60)
             });
 
+            // "Recent only": hide once we know the card is not recent (metadata loaded).
+            // Cards whose metadata has not loaded yet stay visible until we can tell.
+            const settled = !!sig && (viewCount !== null || isRecent);
+            if (settings.recentOnly && isFeedPage() && settled && !isRecent) card.classList.add('yt-halo-old');
+            else card.classList.remove('yt-halo-old');
+
             if (sig && (viewCount !== null || isRecent)) {
                 card.dataset.haloApplied = sig;
             } else {
@@ -501,6 +512,20 @@
         stats.haloRecent = document.querySelectorAll('.yt-halo-new, .yt-halo-both').length;
         stats.haloLowView = document.querySelectorAll('.yt-halo-low-views, .yt-halo-both').length;
         stats.hidden = document.querySelectorAll('.yt-halo-seen').length;
+        stats.hiddenOld = document.querySelectorAll('.yt-halo-old').length;
+    }
+
+    // ───────────────────────── RECENT ONLY (Home + search) ─────────────────────────
+    function unhideOld() {
+        document.querySelectorAll('.yt-halo-old').forEach(el => el.classList.remove('yt-halo-old'));
+    }
+
+    function setRecentOnly(on) {
+        settings.recentOnly = on;
+        save('recentOnly', on);
+        if (on) forceRescan(); else unhideOld();
+        toast(on ? 'Recent only: ON (older videos hidden)' : 'Recent only: OFF');
+        registerMenus();
     }
 
     // ───────────────────────── SORT HOME FEED ─────────────────────────
@@ -539,7 +564,7 @@
 
         const rows = [];
         items.forEach((el, idx) => {
-            if (el.classList.contains('yt-halo-seen')) return;
+            if (el.classList.contains('yt-halo-seen') || el.classList.contains('yt-halo-old')) return;
             if (el.localName === 'ytd-continuation-item-renderer') { setOrder(el, 1000000); return; } // keep infinite-scroll trigger last
             const i = el.localName === 'ytd-rich-item-renderer' ? info.get(el) : null;
             let tier = 2;
@@ -587,7 +612,8 @@
         L.push('Auto-Rescan: ' + (settings.autoRescan ? 'on' : 'off') +
             ' | Shorts uniform: ' + (settings.shortsUniform ? 'on' : 'off') +
             ' | Low-view < ' + CONFIG.lowViewThreshold + ' | Recent < ' + CONFIG.recentHours + 'h');
-        L.push('Sort Home: ' + (settings.sortFeed ? 'on' : 'off'));
+        L.push('Sort Home: ' + (settings.sortFeed ? 'on' : 'off') +
+            ' | Recent only: ' + (settings.recentOnly ? 'on' : 'off') + ' (hidden as old now: ' + stats.hiddenOld + ')');
         L.push('Hide seen: ' + (settings.hideSeen ? 'on' : 'off') +
             ' | History: ' + Object.keys(seenStore).length + ' videos | Hidden now: ' + stats.hidden);
         L.push('Scanned: ' + stats.processed + ' | Recent: ' + stats.haloRecent + ' | Low View: ' + stats.haloLowView);
@@ -617,6 +643,7 @@
                 ' age=' + (i.ageHours === null ? '?' : (i.ageHours < 48 ? i.ageHours.toFixed(1) + 'h' : Math.round(i.ageHours / 24) + 'd')) +
                 ' badge=' + (i.isNew ? 'Y' : 'N') + ' halo=' + i.halo + ' order=' + (card.style.order || '-') +
                 (card.classList.contains('yt-halo-seen') ? ' HIDDEN(seen)' : '') +
+                (card.classList.contains('yt-halo-old') ? ' HIDDEN(old)' : '') +
                 ' thumb=' + ratio + (i.kind === 'short' ? (ok ? ' 16:9 OK' : ' NOT 16:9') : '') +
                 ' "' + i.title + '"' + (i.views === null ? ' meta="' + i.meta + '"' : '')
             );
@@ -706,6 +733,7 @@
         };
         add((settings.hideSeen ? '✅' : '⬜') + ' Hide seen videos on Home (Alt+Shift+H)', () => setHideSeen(!settings.hideSeen));
         add('🗑️ Clear seen history (' + Object.keys(seenStore).length + ' videos)', clearSeen);
+        add((settings.recentOnly ? '✅' : '⬜') + ' Recent only: hide older videos (Alt+Shift+R)', () => setRecentOnly(!settings.recentOnly));
         add((settings.sortFeed ? '✅' : '⬜') + ' Sort Home: low views, then newest (Alt+Shift+S)', () => setSortFeed(!settings.sortFeed));
         add((settings.shortsUniform ? '✅' : '⬜') + ' Shorts look like normal videos', toggleShortsUniform);
         add((settings.autoRescan ? '✅' : '⬜') + ' Auto re-scan', () => setAutoRescan(!settings.autoRescan));
@@ -721,6 +749,10 @@
         if (e.altKey && e.shiftKey && (e.key === 'S' || e.key === 's')) {
             e.preventDefault();
             setSortFeed(!settings.sortFeed);
+        }
+        if (e.altKey && e.shiftKey && (e.key === 'R' || e.key === 'r')) {
+            e.preventDefault();
+            setRecentOnly(!settings.recentOnly);
         }
     });
 
@@ -762,6 +794,7 @@
         if (now - lastNav < 300) return; // fired on both window and document
         lastNav = now;
         recordWatched();
+        if (!isFeedPage()) unhideOld(); // YouTube may reuse card elements on other pages
         if (isHome() && settings.hideSeen) refreshSnapshot();
         setTimeout(forceRescan, 500);
     }
