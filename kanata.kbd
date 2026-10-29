@@ -1,4 +1,3 @@
- 
 (defcfg
   process-unmapped-keys yes
   concurrent-tap-hold yes
@@ -18,27 +17,15 @@
   os-lsft (one-shot-press-pcancel 2000 lsft)
   os-lmet (one-shot-press-pcancel 2000 lmet)
   os-lalt (one-shot-press-pcancel 2000 lalt)
-  os-ralt (one-shot-press-pcancel 2000 ralt)
-  os-rctl (one-shot-press-pcancel 2000 rctl)
   os-rsft (one-shot-press-pcancel 2000 rsft)
 
-  ;; --- Physical Modifier Lock Aliases (Double Tap = Lock Toggle) ---
-  lock-lctl (on-press toggle-vkey v-lctl)
-  lock-lsft (on-press toggle-vkey v-lsft)
-  lock-lmet (on-press toggle-vkey v-lmet)
-  lock-lalt (on-press toggle-vkey v-lalt)
-  lock-ralt (on-press toggle-vkey v-ralt)
-  lock-rctl (on-press toggle-vkey v-rctl)
-  lock-rsft (on-press toggle-vkey v-rsft)
+  ;; --- Right Alt Action ---
+  ;; Single Tap = Copy (C-c), Double Tap = Cut (C-x)
+  ralt-copy-cut (tap-dance $tap-time (C-c C-x))
 
-  ;; --- Physical Modifier Tap-Dance ---
-  td-lctl (tap-dance-eager $tap-time (@os-lctl @lock-lctl))
-  td-lsft (tap-dance-eager $tap-time (@os-lsft @lock-lsft))
-  td-lmet (tap-dance-eager $tap-time (@os-lmet @lock-lmet))
-  td-lalt (tap-dance-eager $tap-time (@os-lalt @lock-lalt))
-  td-ralt (tap-dance-eager $tap-time (@os-ralt @lock-ralt))
-  td-rctl (tap-dance-eager $tap-time (@os-rctl @lock-rctl))
-  td-rsft (tap-dance-eager $tap-time (@os-rsft @lock-rsft))
+  ;; --- Right Ctrl Action ---
+  ;; Single Tap = Paste (C-v), Hold = Volume Layer
+  rctl-vol (tap-hold-press $tap-time $tap-time C-v (layer-toggle volume))
 
   ;; --- Spacebar Action ---
   ;; Tap = Space, Hold = Mouse / Navigation Layer
@@ -59,19 +46,14 @@
           (or (input real lsft) (input real rsft) (input real d) (input real k)))) @toggle-pgdn break
     () pgdn break
   )
-
-  ;; --- Right Ctrl Action ---
-  ;; Single Tap = Paste (C-v)
-  ;; Hold = Toggle Volume Layer (Scroll wheel adjusts volume)
-  rctl-vol (tap-hold-press $tap-time $tap-time C-v (layer-toggle volume))
 )
 
 ;; Primary Base Layer
 (deflayer base
-  @td-lctl @td-lsft @td-lmet @td-lalt @td-ralt @rctl-vol @td-rsft mlft @spc-mouse c s d f e h j k l , u i o @pgdn-action mwu mwd mlft mrgt
+  @os-lctl @os-lsft @os-lmet @os-lalt @ralt-copy-cut @rctl-vol @os-rsft mlft @spc-mouse c s d f e h j k l , u i o @pgdn-action mwu mwd mlft mrgt
 )
 
-;; Dedicated Mouse &amp; Navigation Layer (Active ONLY while holding Spacebar)
+;; Dedicated Mouse & Navigation Layer (Active ONLY while holding Spacebar)
 (deflayer mouse
   _ _ _ _ _ _ _ _ _ mwd mlft mrgt _ mwu left down up rght _ _ _ _ _ _ _ _ _
 )
@@ -88,19 +70,9 @@
 
 (defvirtualkeys
   pgdn-vk pgdn
-
-  ;; Virtual keys for modifier lock
-  v-lctl lctl
-  v-lsft lsft
-  v-lmet lmet
-  v-lalt lalt
-  v-ralt ralt
-  v-rctl rctl
-  v-rsft rsft
 )
 
 (defchordsv2
   ;; Press U + I + O simultaneously to toggle Normal Passthrough Mode ON/OFF
   (u i o) @toggle-passthrough 200 first-release ()
 )
- 
