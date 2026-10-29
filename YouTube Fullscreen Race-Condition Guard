@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         YouTube Fullscreen Race-Condition Guard
 // @namespace    http://tampermonkey.net/
-// @version      2026-10-28
-// @description  Blocks 'f' shortcut until video metadata and frame are ready
+// @version      2026-10-29.2
+// @description  Blocks 'f' shortcut until video metadata and frame are ready, with visual loading badge
 // @author       You
 // @match        https://www.youtube.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=youtube.com
@@ -10,38 +10,193 @@
 // @run-at       document-start
 // ==/UserScript==
 
-(function() {
+(function () {
     'use strict';
 
-    const DEBUG = true; // Debug messages console me dekhne ke liye true rakhein
+    const DEBUG = false;
+    const log = (msg, data = '') => { if (DEBUG) console.log(`[YT-FS-Guard] ${msg}`, data); };
 
-    function log(msg, data = '') {
-        if (DEBUG) console.log(`[YT-FS-Guard] ${msg}`, data);
+    const LOADING = 'linear-gradient(135deg, #f59e0b, #d97706)';
+    const READY   = 'linear-gradient(135deg, #10b981, #059669)';
+    const BLOCKED = 'linear-gradient(135deg, #ef4444, #b91c1c)';
+
+    // ----------------------------------------------------
+    // State
+    // ----------------------------------------------------
+    let loaded = false;      // current watch-page video has reached a usable frame
+    let navPending = false;  // SPA navigation in flight; old <video> may still look "ready"
+
+    const isWatch = () => location.pathname.startsWith('/watch');
+
+    // Always target the main player video, never hover-preview / other <video> tags
+    function getVideo() {
+        return document.querySelector('#movie_player video.html5-main-video')
+            || document.querySelector('video.html5-main-video')
+            || document.querySelector('video');
     }
 
+    // readyState >= 2: current frame available. videoWidth > 0: metadata actually decoded.
+    const isReady = (v) => !!v && v.readyState >= 2 && v.videoWidth > 0;
+
+    // ----------------------------------------------------
+    // Badge UI
+    // ----------------------------------------------------
+    let badge = null;
+    let fadeTimer = null;
+    let hideTimer = null;
+
+    function getBadge() {
+        if (badge && badge.isConnected) return badge;
+        const host = document.body || document.documentElement;
+        if (!host) return null;
+
+        badge = document.createElement('div');
+        badge.id = 'yt-fs-guard-indicator';
+        badge.style.cssText = `
+            position: fixed;
+            top: 68px;
+            right: 20px;
+            z-index: 2147483647;
+            padding: 7px 14px;
+            border-radius: 20px;
+            font-family: Roboto, Arial, sans-serif;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            color: #ffffff;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.45);
+            backdrop-filter: blur(8px);
+            transition: opacity 0.4s ease, transform 0.3s ease;
+            cursor: pointer;
+            user-select: none;
+            display: none;
+            opacity: 0;
+            transform: translateY(-8px);
+        `;
+        badge.addEventListener('click', () => {
+            const v = getVideo();
+            alert(`[YT-FS-Guard Debug]\n${v
+                ? `readyState: ${v.readyState}, networkState: ${v.networkState}, videoWidth: ${v.videoWidth}, loaded: ${loaded}, navPending: ${navPending}`
+                : 'No video found'}`);
+        });
+        host.appendChild(badge);
+        return badge;
+    }
+
+    function hideBadge() {
+        clearTimeout(fadeTimer);
+        clearTimeout(hideTimer);
+        if (!badge) return;
+        badge.style.opacity = '0';
+        badge.style.transform = 'translateY(-8px)';
+        hideTimer = setTimeout(() => {
+            if (badge && badge.style.opacity === '0') badge.style.display = 'none';
+        }, 400);
+    }
+
+    function showStatus(text, bg, autoFade = false) {
+        if (!isWatch()) { hideBadge(); return; }
+        const el = getBadge();
+        if (!el) return;
+
+        clearTimeout(fadeTimer);
+        clearTimeout(hideTimer);
+
+        el.textContent = text;
+        el.style.background = bg;
+        el.style.display = 'block';
+        requestAnimationFrame(() => {
+            el.style.opacity = '1';
+            el.style.transform = 'translateY(0)';
+        });
+
+        if (autoFade) fadeTimer = setTimeout(hideBadge, 1200);
+    }
+
+    // ----------------------------------------------------
+    // Readiness tracking
+    // ----------------------------------------------------
+    function update() {
+        if (!isWatch()) { hideBadge(); return; }
+
+        if (!navPending && isReady(getVideo())) {
+            if (!loaded) {
+                loaded = true;
+                showStatus('✅ Fullscreen Ready', READY, true);
+                log('Video ready');
+            }
+        } else if (!loaded) {
+            showStatus('⏳ Loading Video...', LOADING, false);
+        }
+    }
+
+    function reset() {
+        loaded = false;
+        update();
+    }
+
+    // Media events don't bubble, but they can be captured on document.
+    // This survives YouTube swapping/recreating the <video> element.
+    function onMedia(e) {
+        if (!(e.target instanceof HTMLVideoElement)) return;
+        if (e.target !== getVideo()) return;
+
+        if (e.type === 'loadstart' || e.type === 'emptied') {
+            reset();
+        } else {
+            // loadeddata / canplay / playing: new media is really here
+            navPending = false;
+            update();
+        }
+    }
+    ['loadstart', 'emptied', 'loadeddata', 'canplay', 'playing'].forEach(t =>
+        document.addEventListener(t, onMedia, true));
+
+    // SPA navigation
+    window.addEventListener('yt-navigate-start', () => {
+        navPending = true;
+        reset();
+    });
+
+    window.addEventListener('yt-navigate-finish', () => {
+        // Fallback in case no media event arrives (e.g. same source reused)
+        setTimeout(() => { navPending = false; update(); }, 2500);
+        update();
+    });
+
+    document.addEventListener('DOMContentLoaded', update);
+
+    // Safety net: poll lightly while not loaded, in case an event was missed
+    setInterval(() => { if (!loaded && isWatch()) update(); }, 500);
+
+    // ----------------------------------------------------
+    // Shortcut blocker
+    // ----------------------------------------------------
     window.addEventListener('keydown', (e) => {
-        // Sirf tab act kare jab 'f' bina modifier keys ke dabaya gaya ho
-        if (e.key.toLowerCase() !== 'f' || e.ctrlKey || e.altKey || e.metaKey) return;
+        if (!e.key || e.key.toLowerCase() !== 'f') return;
+        if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
+        if (!isWatch()) return;
 
-        // Input fields aur contenteditable (comments/search) check
-        const active = document.activeElement;
-        const isEditable = active && (
-            ['INPUT', 'TEXTAREA'].includes(active.tagName) ||
-            active.isContentEditable ||
-            active.getAttribute('role') === 'textbox'
+        // composedPath()[0] sees through shadow DOM, unlike document.activeElement
+        const t = (e.composedPath && e.composedPath()[0]) || e.target;
+        const isEditable = t && (
+            ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName) ||
+            t.isContentEditable ||
+            (t.getAttribute && t.getAttribute('role') === 'textbox')
         );
-
         if (isEditable) return;
 
-        const v = document.querySelector('video');
+        if (loaded) return;
 
-        // readyState < 2 matlab HAVE_CURRENT_DATA abhi nahi mila
-        if (!v || v.readyState < 2) {
-            e.stopImmediatePropagation();
-            e.preventDefault();
-            log('Blocked premature "f" press! Video state:', v ? `readyState=${v.readyState}` : 'video element missing');
-        } else {
-            log('Allowed "f" press. Video readyState:', v.readyState);
+        if (!navPending && isReady(getVideo())) {
+            loaded = true;
+            return;
         }
+
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        showStatus('⚠️ Wait: Video Buffering...', BLOCKED, false);
+        log('Blocked premature "f" press');
+        setTimeout(update, 1000);
     }, true);
 })();
