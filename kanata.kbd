@@ -1,3 +1,4 @@
+ 
 (defcfg
   process-unmapped-keys yes
   concurrent-tap-hold yes
@@ -18,6 +19,11 @@
   os-lmet (one-shot-press-pcancel 2000 lmet)
   os-lalt (one-shot-press-pcancel 2000 lalt)
   os-rsft (one-shot-press-pcancel 2000 rsft)
+
+  ;; --- Smooth Mouse Wheel Scrolling ---
+  ;; Parameters: (mwheel-direction interval_ms distance_units)
+  mau (mwheel-up 50 120)
+  mad (mwheel-down 50 120)
 
   ;; --- Right Alt Action ---
   ;; Single Tap = Copy (C-c), Double Tap = Cut (C-x)
@@ -55,7 +61,7 @@
 
 ;; Dedicated Mouse & Navigation Layer (Active ONLY while holding Spacebar)
 (deflayer mouse
-  _ _ _ _ _ _ _ _ _ mwd mlft mrgt _ mwu left down up rght _ _ _ _ _ _ _ _ _
+  _ _ _ _ _ _ _ _ _ @mad mlft mrgt _ @mau left down up rght _ _ _ _ _ _ _ _ _
 )
 
 ;; Dedicated Volume Control Layer (Active ONLY while holding Right Ctrl)
