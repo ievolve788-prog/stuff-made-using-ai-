@@ -1,0 +1,108 @@
+// ==UserScript==
+// @name         YouTube In-Page Fullscreen Player
+// @namespace    https://tampermonkey.net/
+// @version      1.0
+// @description  Homepage par video pe single click karo to page chhodne ke bajay poori screen overlay me video khulta hai
+// @match        https://www.youtube.com/*
+// @run-at       document-start
+// @grant        none
+// ==/UserScript==
+
+(function () {
+  'use strict';
+
+  // true = sirf homepage par kaam kare
+  // false = homepage, search, channel, subscriptions wagairah sab par (watch/shorts page ko chhodkar)
+  const ONLY_HOMEPAGE = false;
+
+  // Overlay ke andar wale iframe me script kuch na kare (warna nested overlay banega)
+  if (window.top !== window.self) return;
+
+  let overlay = null;
+  let prevOverflow = '';
+
+  function getVideoId(href) {
+    try {
+      const u = new URL(href, location.origin);
+      if (u.pathname === '/watch') return u.searchParams.get('v');
+      const m = u.pathname.match(/^\/shorts\/([\w-]{6,})/);
+      return m ? m[1] : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function closeOverlay() {
+    if (!overlay) return;
+    overlay.remove();
+    overlay = null;
+    document.documentElement.style.overflow = prevOverflow;
+  }
+
+  function openOverlay(id, originalHref) {
+    closeOverlay();
+
+    // homepage ke hover-preview videos ko rok do
+    document.querySelectorAll('video').forEach(v => { try { v.pause(); } catch (e) {} });
+
+    overlay = document.createElement('div');
+    overlay.style.cssText =
+      'position:fixed;inset:0;z-index:2147483647;background:#000;display:flex;flex-direction:column;';
+
+    const bar = document.createElement('div');
+    bar.style.cssText =
+      'display:flex;gap:10px;justify-content:flex-end;padding:8px 12px;background:#111;';
+
+    const btnStyle =
+      'cursor:pointer;border:0;border-radius:18px;padding:8px 16px;font:500 14px Roboto,Arial,sans-serif;background:#272727;color:#fff;';
+
+    const openBtn = document.createElement('button');
+    openBtn.textContent = 'Normal page me kholo';
+    openBtn.style.cssText = btnStyle;
+    openBtn.onclick = () => { closeOverlay(); location.href = originalHref; };
+
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '✕ Band karo (Esc)';
+    closeBtn.style.cssText = btnStyle + 'background:#cc0000;';
+    closeBtn.onclick = closeOverlay;
+
+    bar.append(openBtn, closeBtn);
+
+    const frame = document.createElement('iframe');
+    // Embed player block ho jata hai (Error 152), isliye asli watch page same-origin iframe me
+    frame.src = originalHref;
+    frame.allow = 'autoplay; fullscreen; picture-in-picture; encrypted-media';
+    frame.allowFullscreen = true;
+    frame.style.cssText = 'flex:1;width:100%;border:0;background:#000;';
+
+    overlay.append(bar, frame);
+    document.documentElement.appendChild(overlay);
+
+    prevOverflow = document.documentElement.style.overflow;
+    document.documentElement.style.overflow = 'hidden';
+  }
+
+  // Single click ko capture phase me pakdo, YouTube ke apne handler se pehle
+  document.addEventListener('click', function (e) {
+    if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    if (ONLY_HOMEPAGE && location.pathname !== '/') return;
+    // Video/Shorts page par already ho to normal behaviour rahne do
+    if (location.pathname === '/watch' || location.pathname.startsWith('/shorts/')) return;
+    if (overlay && overlay.contains(e.target)) return;
+
+    const a = e.target.closest && e.target.closest('a[href]');
+    if (!a) return;
+
+    const id = getVideoId(a.getAttribute('href'));
+    if (!id) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    openOverlay(id, a.href);
+  }, true);
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && overlay) closeOverlay();
+  }, true);
+})();
