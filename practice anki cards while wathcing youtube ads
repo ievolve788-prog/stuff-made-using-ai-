@@ -1,0 +1,375 @@
+// ==UserScript==
+// @name         Anki on YouTube ads
+// @namespace    https://example.local/anki-yt-ads
+// @version      1.0.0
+// @description  While a YouTube ad plays, mute it and show your Anki cards over it so you can review instead. The ad is not skipped or blocked.
+// @match        https://www.youtube.com/*
+// @run-at       document-idle
+// @grant        GM_xmlhttpRequest
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_registerMenuCommand
+// @connect      127.0.0.1
+// @connect      localhost
+// ==/UserScript==
+
+(function () {
+  'use strict';
+
+  const ANKI = 'http://127.0.0.1:8765';
+
+  /* ------------------------------------------------------------- settings */
+  const cfg = {
+    enabled: GM_getValue('enabled', true),
+    deck: GM_getValue('deck', ''),          // '' = all decks
+    newLimit: GM_getValue('newLimit', 0),   // extra new cards per load
+    random: GM_getValue('random', true),
+    debug: GM_getValue('debug', false),
+  };
+  const save = (k, v) => { cfg[k] = v; GM_setValue(k, v); };
+  const dbg = (...a) => { if (cfg.debug) console.debug('[anki-yt]', ...a); };
+  const err = (...a) => console.error('[anki-yt]', ...a);
+
+  /* ----------------------------------------------------------- AnkiConnect */
+  function invoke(action, params = {}) {
+    dbg('→', action, params);
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: 'POST',
+        url: ANKI,
+        data: JSON.stringify({ action, version: 6, params }),
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 15000,
+        onload: (r) => {
+          let j;
+          try { j = JSON.parse(r.responseText); } catch (e) {
+            const hint = r.status === 403
+              ? ' (403: add "https://www.youtube.com" to AnkiConnect webCorsOriginList and restart Anki)' : '';
+            return reject(new Error(`Bad response from AnkiConnect, HTTP ${r.status}${hint}`));
+          }
+          if (j.error) { err(action, j.error); return reject(new Error(j.error)); }
+          dbg('←', action, j.result);
+          resolve(j.result);
+        },
+        onerror: () => reject(Object.assign(new Error('Cannot reach Anki. Is Anki open with AnkiConnect installed?'), { network: true })),
+        ontimeout: () => reject(Object.assign(new Error('Anki timed out'), { network: true })),
+      });
+    });
+  }
+
+  /* ----------------------------------------------------------------- state */
+  const S = {
+    queue: [], idx: 0, info: null, answerShown: false,
+    loaded: false, loading: false, busy: false, errorMsg: '',
+    inAd: false, wasMuted: false,
+    stats: { reviewed: 0, suspended: 0, deleted: 0, skipped: 0 },
+  };
+
+  /* --------------------------------------------------------------- helpers */
+  const escSearch = (s) => s.replace(/[\\"*_]/g, '\\$&');
+
+  const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+    webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp', avif: 'image/avif' };
+  const mediaCache = new Map();
+
+  async function mediaUri(name) {
+    if (mediaCache.has(name)) return mediaCache.get(name);
+    let filename = name;
+    try { filename = decodeURIComponent(name); } catch (e) { /* keep raw */ }
+    let uri = null;
+    try {
+      const b64 = await invoke('retrieveMediaFile', { filename });
+      if (b64) uri = `data:${MIME[filename.split('.').pop().toLowerCase()] || 'application/octet-stream'};base64,${b64}`;
+    } catch (e) { dbg('media failed', filename, e.message); }
+    mediaCache.set(name, uri);
+    return uri;
+  }
+
+  async function inlineMedia(html) {
+    const re = /(<img[^>]*?\ssrc=)(["'])([^"']+)\2/gi;
+    const names = new Set();
+    for (const m of html.matchAll(re)) if (!/^(https?:|data:|blob:)/i.test(m[3])) names.add(m[3]);
+    const map = new Map();
+    for (const n of names) map.set(n, await mediaUri(n));
+    return html.replace(re, (all, pre, q, src) => (map.get(src) ? `${pre}${q}${map.get(src)}${q}` : all));
+  }
+
+  function el(tag, props = {}, ...kids) {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) {
+      if (k === 'class') e.className = v;
+      else if (k === 'on') for (const [ev, fn] of Object.entries(v)) e.addEventListener(ev, fn);
+      else e.setAttribute(k, v);
+    }
+    for (const k of kids) e.append(k);
+    return e;
+  }
+
+  /* ---------------------------------------------------------------- overlay */
+  const CSS = `
+  .ayt{position:absolute;left:0;right:0;top:0;bottom:96px;z-index:1000;display:none;flex-direction:column;
+    background:#101216;color:#e8eaee;font:14px/1.4 system-ui,sans-serif}
+  .ayt.on{display:flex}
+  .ayt-top{display:flex;justify-content:space-between;gap:12px;padding:6px 12px;font-size:12px;color:#9aa1ac}
+  .ayt-frame{flex:1;min-height:0;width:100%;border:0;background:#fff}
+  .ayt-msg{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:16px;text-align:center}
+  .ayt-row{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;padding:6px}
+  .ayt button{font:inherit;padding:6px 12px;border:1px solid #3a3f49;border-radius:8px;background:#1f2227;color:#e8eaee;cursor:pointer}
+  .ayt button:hover{border-color:#6ea8ff}
+  .ayt button:disabled{opacity:.5;cursor:default}
+  .ayt button.pri{background:#2563eb;border-color:#2563eb;min-width:200px}
+  .ayt button.again{border-bottom:3px solid #dc2626}.ayt button.hard{border-bottom:3px solid #d97706}
+  .ayt button.good{border-bottom:3px solid #16a34a}.ayt button.easy{border-bottom:3px solid #2563eb}
+  .ayt button.del{color:#f87171}
+  .ayt kbd{font-size:10px;opacity:.7;margin-left:4px}`;
+
+  const ui = {};   // element refs
+  let blobUrl = null;
+
+  function ensureOverlay(player) {
+    if (ui.root && ui.root.isConnected && ui.root.parentElement === player) return;
+    if (!document.getElementById('ayt-style')) {
+      const st = el('style', { id: 'ayt-style' });
+      st.textContent = CSS;
+      document.head.append(st);
+    }
+    ui.deck = el('span'); ui.prog = el('span');
+    ui.frame = el('iframe', { class: 'ayt-frame', sandbox: 'allow-same-origin', title: 'Anki card' });
+    ui.msgText = el('div'); ui.msgBtn = el('button', { on: { click: () => reload() } }, 'Reload cards');
+    ui.msg = el('div', { class: 'ayt-msg' }, ui.msgText, ui.msgBtn);
+    ui.show = el('button', { class: 'pri', on: { click: showAnswer } }, 'Show answer', el('kbd', {}, 'Space'));
+    ui.showRow = el('div', { class: 'ayt-row' }, ui.show);
+    const rb = (label, ease, cls) => el('button', { class: cls, on: { click: () => rate(ease) } }, label, el('kbd', {}, String(ease)));
+    ui.rateRow = el('div', { class: 'ayt-row' }, rb('Again', 1, 'again'), rb('Hard', 2, 'hard'), rb('Good', 3, 'good'), rb('Easy', 4, 'easy'));
+    ui.extraRow = el('div', { class: 'ayt-row' },
+      el('button', { on: { click: skip } }, 'Skip', el('kbd', {}, 'K')),
+      el('button', { on: { click: suspend } }, 'Suspend', el('kbd', {}, 'S')),
+      el('button', { class: 'del', on: { click: del } }, 'Delete note', el('kbd', {}, 'D')));
+    ui.root = el('div', { class: 'ayt', id: 'ayt-overlay' },
+      el('div', { class: 'ayt-top' }, el('span', {}, 'Ad muted · reviewing Anki · '), ui.deck, ui.prog),
+      ui.frame, ui.msg, ui.showRow, ui.rateRow, ui.extraRow);
+    // keep clicks inside from reaching the player (which would pause / open the ad link)
+    ['click', 'dblclick', 'mousedown', 'pointerdown'].forEach((ev) =>
+      ui.root.addEventListener(ev, (e) => e.stopPropagation()));
+    player.append(ui.root);
+  }
+
+  // YouTube enforces Trusted Types, so assigning HTML strings can throw.
+  let ttPolicy;
+  function trusted(html) {
+    try {
+      if (window.trustedTypes) {
+        ttPolicy = ttPolicy || window.trustedTypes.createPolicy('anki-yt-ads', { createHTML: (x) => x });
+        return ttPolicy.createHTML(html);
+      }
+    } catch (e) { dbg('trustedTypes policy failed', e.message); }
+    return html;
+  }
+
+  function setFrame(doc) {
+    if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrl = null; }
+    try {
+      ui.frame.removeAttribute('src');
+      ui.frame.srcdoc = trusted(doc);
+    } catch (e) {
+      dbg('srcdoc blocked, using blob URL', e.message);
+      blobUrl = URL.createObjectURL(new Blob([doc], { type: 'text/html' }));
+      ui.frame.removeAttribute('srcdoc');
+      ui.frame.src = blobUrl;
+    }
+  }
+
+  async function renderHtml(html) {
+    html = html.replace(/\[(sound|anki:play)[^\]]*\]/g, '');
+    html = await inlineMedia(html);
+    const css = (S.info && S.info.css) || '';
+    setFrame(`<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;padding:12px;overflow:auto}img{max-width:100%;max-height:70vh}${css}</style></head><body><div class="card">${html}</div></body></html>`);
+  }
+
+  function setMode(mode, text) {   // 'card' | 'msg'
+    const card = mode === 'card';
+    ui.frame.style.display = card ? '' : 'none';
+    ui.msg.style.display = card ? 'none' : '';
+    ui.showRow.style.display = card && !S.answerShown ? '' : 'none';
+    ui.rateRow.style.display = card && S.answerShown ? '' : 'none';
+    ui.extraRow.style.display = card ? '' : 'none';
+    if (!card) ui.msgText.textContent = text || '';
+    ui.deck.textContent = S.info && card ? S.info.deckName : '';
+    ui.prog.textContent = card ? ` · ${S.idx + 1}/${S.queue.length}` : '';
+  }
+
+  /* --------------------------------------------------------------- session */
+  async function reload() {
+    if (S.loading) return;
+    S.loading = true; S.errorMsg = '';
+    if (ui.root) setMode('msg', 'Loading your cards…');
+    try {
+      const scope = cfg.deck ? `deck:"${escSearch(cfg.deck)}" ` : '';
+      const due = await invoke('findCards', { query: `${scope}is:due -is:suspended -is:buried` });
+      let fresh = [];
+      if (cfg.newLimit > 0) {
+        fresh = (await invoke('findCards', { query: `${scope}is:new -is:suspended -is:buried` })).slice(0, cfg.newLimit);
+      }
+      const q = [...due, ...fresh];
+      if (cfg.random) for (let i = q.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [q[i], q[j]] = [q[j], q[i]]; }
+      S.queue = q; S.idx = 0; S.info = null; S.loaded = true;
+      S.stats = { reviewed: 0, suspended: 0, deleted: 0, skipped: 0 };
+      dbg(`queue: ${due.length} due + ${fresh.length} new`);
+      await showCard();
+    } catch (e) {
+      S.errorMsg = e.message; S.loaded = false;
+      err(e.message);
+      if (ui.root) setMode('msg', e.message);
+    } finally { S.loading = false; }
+  }
+
+  async function showCard() {
+    while (S.idx < S.queue.length) {
+      const [info] = await invoke('cardsInfo', { cards: [S.queue[S.idx]] });
+      if (info && info.cardId) {
+        S.info = info; S.answerShown = false;
+        await renderHtml(info.question);
+        setMode('card');
+        return;
+      }
+      S.idx++;
+    }
+    S.info = null;
+    const s = S.stats;
+    setMode('msg', `All done 🎉  Reviewed ${s.reviewed} · suspended ${s.suspended} · deleted ${s.deleted} · skipped ${s.skipped}`);
+  }
+
+  async function act(label, fn) {
+    if (S.busy) return;
+    S.busy = true;
+    ui.root.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+    try { await fn(); } catch (e) {
+      err(label, e.message);
+      setMode('msg', `${label} failed: ${e.message}`);
+    } finally {
+      S.busy = false;
+      ui.root.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+    }
+  }
+
+  const advance = async () => { S.idx++; await showCard(); };
+
+  function showAnswer() {
+    if (!S.info || S.answerShown) return;
+    return act('Show answer', async () => { S.answerShown = true; await renderHtml(S.info.answer); setMode('card'); });
+  }
+  function rate(ease) {
+    if (!S.info || !S.answerShown) return;
+    return act('Answer', async () => {
+      const r = await invoke('answerCards', { answers: [{ cardId: S.info.cardId, ease }] });
+      if (!r || r[0] !== true) throw new Error('Anki refused the answer');
+      S.stats.reviewed++; await advance();
+    });
+  }
+  function skip() { if (S.info) return act('Skip', async () => { S.stats.skipped++; await advance(); }); }
+  function suspend() {
+    if (!S.info) return;
+    return act('Suspend', async () => {
+      if (!(await invoke('suspend', { cards: [S.info.cardId] }))) throw new Error('Anki did not suspend the card');
+      S.stats.suspended++; await advance();
+    });
+  }
+  function del() {
+    if (!S.info) return;
+    const info = S.info;
+    if (!window.confirm('Permanently delete this note and ALL its cards?')) return;
+    return act('Delete', async () => {
+      await invoke('deleteNotes', { notes: [info.note] });
+      S.stats.deleted++; await advance();
+    });
+  }
+
+  /* -------------------------------------------------------- keyboard (ads) */
+  window.addEventListener('keydown', (e) => {
+    if (!S.inAd || !ui.root || !ui.root.classList.contains('on')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = (e.target && e.target.tagName || '').toLowerCase();
+    if (t === 'input' || t === 'textarea' || (e.target && e.target.isContentEditable)) return;
+    if (!S.info || S.busy) return;
+    const k = e.key.toLowerCase();
+    let handled = true;
+    if (k === ' ' || k === 'enter') { if (S.answerShown) rate(3); else showAnswer(); }
+    else if (['1', '2', '3', '4'].includes(k)) rate(Number(k));
+    else if (k === 's') suspend();
+    else if (k === 'k') skip();
+    else if (k === 'd') del();
+    else handled = false;
+    if (handled) { e.preventDefault(); e.stopImmediatePropagation(); }
+  }, true);   // capture phase: runs before YouTube's own hotkeys
+
+  /* --------------------------------------------------------- ad detection */
+  const isAd = (p) => p.classList.contains('ad-showing') || p.classList.contains('ad-interrupting');
+  const muted = (p) => (typeof p.isMuted === 'function' ? p.isMuted() : (p.querySelector('video') || {}).muted);
+
+  function setMute(p, on) {
+    try {
+      if (on) { if (typeof p.mute === 'function') p.mute(); }
+      else if (typeof p.unMute === 'function') p.unMute();
+    } catch (e) { /* ignore */ }
+    const v = p.querySelector('video');
+    if (v) v.muted = on;
+  }
+
+  function adStart(p) {
+    S.inAd = true;
+    S.wasMuted = !!muted(p);
+    dbg('ad started; was muted =', S.wasMuted);
+    ensureOverlay(p);
+    ui.root.classList.add('on');
+    if (S.loaded && S.info) setMode('card');
+    else if (S.errorMsg) setMode('msg', S.errorMsg);
+    else { setMode('msg', 'Loading your cards…'); reload(); }
+  }
+
+  function adEnd(p) {
+    S.inAd = false;
+    dbg('ad ended');
+    if (ui.root) ui.root.classList.remove('on');
+    if (!S.wasMuted) setMute(p, false);   // only unmute if WE muted it
+  }
+
+  function tick() {
+    if (!cfg.enabled) { if (S.inAd) { const p0 = document.getElementById('movie_player'); if (p0) adEnd(p0); } return; }
+    const p = document.getElementById('movie_player');
+    if (!p) return;
+    const ad = isAd(p);
+    if (ad && !S.inAd) adStart(p);
+    else if (!ad && S.inAd) adEnd(p);
+    if (ad) {
+      if (!muted(p)) setMute(p, true);          // YouTube can unmute between ads in a pod
+      ensureOverlay(p);
+      if (!ui.root.classList.contains('on')) ui.root.classList.add('on');
+    }
+  }
+  setInterval(tick, 400);
+
+  /* ---------------------------------------------------------- menu commands */
+  GM_registerMenuCommand('Anki: enable / disable', () => { save('enabled', !cfg.enabled); alert(`Anki on ads: ${cfg.enabled ? 'ON' : 'OFF'}`); });
+  GM_registerMenuCommand('Anki: choose deck', async () => {
+    try {
+      const decks = (await invoke('deckNames')).sort((a, b) => a.localeCompare(b));
+      const list = decks.map((d, i) => `${i + 1}. ${d}`).join('\n');
+      const ans = prompt(`Type a deck number (0 = all decks):\n\n${list}`, '0');
+      if (ans === null) return;
+      const n = parseInt(ans, 10);
+      if (Number.isNaN(n) || n < 0 || n > decks.length) return alert('Not a valid number');
+      save('deck', n === 0 ? '' : decks[n - 1]);
+      S.loaded = false; S.errorMsg = '';
+      alert(`Deck: ${cfg.deck || 'All decks'}`);
+    } catch (e) { alert(e.message); }
+  });
+  GM_registerMenuCommand('Anki: new cards per load', () => {
+    const ans = prompt('How many NEW cards to add to the queue (0 = only due cards)?', String(cfg.newLimit));
+    if (ans === null) return;
+    save('newLimit', Math.max(0, parseInt(ans, 10) || 0));
+    S.loaded = false;
+  });
+  GM_registerMenuCommand('Anki: toggle random order', () => { save('random', !cfg.random); S.loaded = false; alert(`Random order: ${cfg.random ? 'ON' : 'OFF'}`); });
+  GM_registerMenuCommand('Anki: toggle debug (console)', () => { save('debug', !cfg.debug); alert(`Debug: ${cfg.debug ? 'ON' : 'OFF'} (see DevTools console, filter "anki-yt")`); });
+  GM_registerMenuCommand('Anki: reload queue now', () => { S.loaded = false; reload(); });
+})();
