@@ -17,6 +17,14 @@ from tkinter import filedialog, messagebox, ttk
 NEEDED = ["pdftoppm", "potrace", "pdfunite"]
 
 
+def page_sizes(pdf):
+    """Exact page sizes (w, h in pt) of the original, so the trace lines up perfectly."""
+    import re
+    out = subprocess.run(["pdfinfo", "-f", "1", "-l", "9999", pdf], stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE).stdout.decode(errors="ignore")
+    return [(m[0], m[1]) for m in re.findall(r"Page\s+\d+ size:\s+([\d.]+) x ([\d.]+)", out)]
+
+
 def run(cmd):
     subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
@@ -32,6 +40,7 @@ class App(tk.Tk):
         self.speckle = tk.IntVar(value=4)
         self.make_svg = tk.BooleanVar(value=True)
         self.make_pdf = tk.BooleanVar(value=True)
+        self.overlay = tk.BooleanVar(value=True)
 
         pad = {"padx": 10, "pady": 5}
         f = ttk.Frame(self)
@@ -55,14 +64,17 @@ class App(tk.Tk):
         ttk.Checkbutton(f, text="Save one SVG per page", variable=self.make_svg).grid(row=4, column=1, sticky="w")
         ttk.Checkbutton(f, text="Save combined vector PDF", variable=self.make_pdf).grid(row=5, column=1, sticky="w")
 
+        ttk.Checkbutton(f, text="Save original PDF + vector overlay (keeps your scan, sharp when zoomed)",
+                        variable=self.overlay).grid(row=6, column=1, columnspan=2, sticky="w")
+
         self.btn = ttk.Button(f, text="Convert", command=self.start)
-        self.btn.grid(row=6, column=1, pady=8)
+        self.btn.grid(row=7, column=1, pady=8)
         self.bar = ttk.Progressbar(f, mode="determinate")
-        self.bar.grid(row=7, column=0, columnspan=3, sticky="we")
+        self.bar.grid(row=8, column=0, columnspan=3, sticky="we")
         self.log = tk.Text(f, height=9, state="disabled")
-        self.log.grid(row=8, column=0, columnspan=3, sticky="nsew", pady=5)
+        self.log.grid(row=9, column=0, columnspan=3, sticky="nsew", pady=5)
         f.columnconfigure(1, weight=1)
-        f.rowconfigure(8, weight=1)
+        f.rowconfigure(9, weight=1)
 
         missing = [c for c in NEEDED if not shutil.which(c)]
         if missing:
@@ -88,7 +100,10 @@ class App(tk.Tk):
         if not os.path.isfile(p):
             messagebox.showerror("Error", "Choose a PDF first.")
             return
-        if not (self.make_svg.get() or self.make_pdf.get()):
+        if self.overlay.get() and not shutil.which("qpdf"):
+            messagebox.showerror("Error", "Overlay needs qpdf.\nRun: sudo apt install qpdf")
+            return
+        if not (self.make_svg.get() or self.make_pdf.get() or self.overlay.get()):
             messagebox.showerror("Error", "Tick at least one output.")
             return
         self.btn.state(["disabled"])
@@ -109,18 +124,30 @@ class App(tk.Tk):
             pages = sorted(glob.glob(os.path.join(tmp, "p-*.pgm")))
             self.ui(self.bar.config, {"maximum": len(pages), "value": 0})
             pdfs = []
+            sizes = page_sizes(pdf)
             for i, img in enumerate(pages, 1):
                 n = os.path.basename(img)[:-4]
                 if self.make_svg.get():
                     run(["potrace", img, "-s", "-r", dpi, "-k", k, "-t", t, "-o", os.path.join(out, n + ".svg")])
-                if self.make_pdf.get():
+                if self.make_pdf.get() or self.overlay.get():
                     pp = os.path.join(tmp, n + ".pdf")
-                    run(["potrace", img, "-b", "pdf", "-r", dpi, "-k", k, "-t", t, "-o", pp])
+                    size = ["-W", sizes[i - 1][0] + "pt", "-H", sizes[i - 1][1] + "pt"] if i <= len(sizes) else ["-r", dpi]
+                    run(["potrace", img, "-b", "pdf"] + size + ["-k", k, "-t", t, "-o", pp])
                     pdfs.append(pp)
                 self.ui(self.bar.config, {"value": i})
                 self.ui(self.say, "Page %d/%d done" % (i, len(pages)))
             if pdfs:
-                run(["pdfunite"] + pdfs + [os.path.join(out, base + "_vector.pdf")])
+                vec = os.path.join(tmp, "all_vector.pdf")
+                run(["pdfunite"] + pdfs + [vec])
+                if self.make_pdf.get():
+                    shutil.copy(vec, os.path.join(out, base + "_vector.pdf"))
+                if self.overlay.get():
+                    self.ui(self.say, "Overlaying vector on original…")
+                    dst = os.path.join(out, base + "_original_plus_vector.pdf")
+                    r = subprocess.run(["qpdf", pdf, "--overlay", vec, "--", dst],
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    if r.returncode not in (0, 3):  # 3 = warnings only
+                        raise RuntimeError("qpdf: " + r.stderr.decode(errors="ignore"))
             shutil.rmtree(tmp, ignore_errors=True)
             self.ui(self.say, "DONE → " + out)
             self.ui(lambda: subprocess.Popen(["xdg-open", out]))
