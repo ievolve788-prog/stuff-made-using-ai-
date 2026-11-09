@@ -1,0 +1,110 @@
+D=~/.local/share/gnome-shell/extensions/scrollvolume@local
+mkdir -p "$D"
+
+cat > "$D/metadata.json" <<'EOF'
+{
+  "uuid": "scrollvolume@local",
+  "name": "Corner Scroll Volume",
+  "description": "Scroll in the bottom-right corner to change volume by 1% with the native OSD",
+  "shell-version": ["45", "46", "47", "48", "49"]
+}
+EOF
+
+cat > "$D/extension.js" <<'EOF'
+import Clutter from 'gi://Clutter';
+import Gio from 'gi://Gio';
+import St from 'gi://St';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
+import {getMixerControl} from 'resource:///org/gnome/shell/ui/status/volume.js';
+
+const STEP_PERCENT = 1;  // change this for bigger/smaller steps
+const SIZE = 4;          // corner zone size in pixels
+
+export default class CornerScrollVolume extends Extension {
+    enable() {
+        this._mixer = getMixerControl();
+        this._acc = 0;
+
+        this._actor = new St.Widget({reactive: true, width: SIZE, height: SIZE});
+        this._actor.connect('scroll-event', (_a, event) => this._onScroll(event));
+        Main.layoutManager.addChrome(this._actor, {
+            affectsInputRegion: true,
+            trackFullscreen: true,
+        });
+
+        this._monitorsId = Main.layoutManager.connect('monitors-changed',
+            () => this._reposition());
+        this._reposition();
+    }
+
+    disable() {
+        if (this._monitorsId) {
+            Main.layoutManager.disconnect(this._monitorsId);
+            this._monitorsId = null;
+        }
+        if (this._actor) {
+            Main.layoutManager.removeChrome(this._actor);
+            this._actor.destroy();
+            this._actor = null;
+        }
+        this._mixer = null;
+    }
+
+    _reposition() {
+        const m = Main.layoutManager.primaryMonitor;
+        if (!m) return;
+        this._actor.set_position(m.x + m.width - SIZE, m.y + m.height - SIZE);
+    }
+
+    _onScroll(event) {
+        const dir = event.get_scroll_direction();
+        let steps = 0;
+
+        if (dir === Clutter.ScrollDirection.UP) {
+            steps = 1;
+        } else if (dir === Clutter.ScrollDirection.DOWN) {
+            steps = -1;
+        } else if (dir === Clutter.ScrollDirection.SMOOTH) {
+            const [, dy] = event.get_scroll_delta();
+            this._acc += dy;
+            const whole = Math.trunc(this._acc);
+            if (whole !== 0) {
+                steps = -whole;
+                this._acc -= whole;
+            }
+        }
+
+        if (steps !== 0)
+            this._change(steps);
+        return Clutter.EVENT_STOP;
+    }
+
+    _change(steps) {
+        const stream = this._mixer.get_default_sink();
+        if (!stream) return;
+
+        const max = this._mixer.get_vol_max_norm();  // 100%
+        const delta = Math.round(max * STEP_PERCENT / 100) * steps;
+        const vol = Math.max(0, Math.min(max, stream.volume + delta));
+
+        stream.volume = vol;
+        stream.push_volume();
+        if (stream.is_muted && vol > 0)
+            stream.change_is_muted(false);
+
+        const level = vol / max;
+        let name = 'audio-volume-muted-symbolic';
+        if (level > 0.66) name = 'audio-volume-high-symbolic';
+        else if (level > 0.33) name = 'audio-volume-medium-symbolic';
+        else if (level > 0) name = 'audio-volume-low-symbolic';
+
+        const icon = Gio.Icon.new_for_string(name);
+        const n = Main.layoutManager.monitors.length;
+        for (let i = 0; i < n; i++)
+            Main.osdWindowManager.show(i, icon, null, level, 1.0);
+    }
+}
+EOF
+
+gnome-extensions enable scrollvolume@local
