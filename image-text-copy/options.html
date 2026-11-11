@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Image Text Copier – Settings</title>
+  <style>
+    :root { --bg: #ffffff; --fg: #202124; --muted: #5f6368; --line: #dadce0; --accent: #1a73e8; --warn: #d93025; --ok: #188038; --field: #ffffff; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #202124; --fg: #e8eaed; --muted: #9aa0a6; --line: #3c4043; --accent: #8ab4f8; --warn: #f28b82; --ok: #81c995; --field: #292a2d; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, sans-serif; }
+    main { max-width: 680px; margin: 0 auto; padding: 24px 16px 48px; }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    h2 { font-size: 15px; margin: 28px 0 6px; }
+    p.hint { margin: 2px 0 8px; color: var(--muted); font-size: 13px; }
+    textarea { width: 100%; min-height: 150px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); color: var(--fg); font: 13px/1.5 ui-monospace, Consolas, monospace; resize: vertical; }
+    label.row { display: flex; gap: 10px; align-items: flex-start; margin: 8px 0; cursor: pointer; }
+    label.row input { margin-top: 4px; }
+    label.row small { display: block; color: var(--muted); font-size: 12.5px; }
+    button { padding: 7px 14px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--fg); font: inherit; cursor: pointer; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    @media (prefers-color-scheme: dark) { button.primary { color: #202124; } }
+    .actions { display: flex; gap: 10px; align-items: center; margin-top: 24px; }
+    #warn { color: var(--warn); font-size: 13px; min-height: 1.4em; margin: 4px 0; }
+    #saved { color: var(--ok); }
+    fieldset { border: 0; margin: 0; padding: 0; }
+    fieldset:disabled { opacity: .5; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Image Text Copier – Settings</h1>
+  <p class="hint">Changes apply the next time you click the image button.</p>
+
+  <h2>Open Google AI Mode in</h2>
+  <label class="row"><input type="radio" name="openIn" value="sidepanel">
+    <span>Side panel <small>Chrome's side panel next to the page you're on. If Google can't be shown there, a new tab is opened automatically.</small></span></label>
+  <label class="row"><input type="radio" name="openIn" value="tab">
+    <span>New tab <small>Opens next to the current tab.</small></span></label>
+
+  <h2>Prompt</h2>
+  <p class="hint">What Google AI Mode is asked together with the image. The default makes it return only the exact text.</p>
+  <textarea id="prompt" spellcheck="false"></textarea>
+  <div id="warn"></div>
+  <button id="resetPrompt" type="button">Reset prompt to default</button>
+
+  <h2>Sending</h2>
+  <label class="row"><input type="checkbox" id="autoSend">
+    <span>Press Send automatically <small>Off = the image and prompt are put in the box and you press Enter yourself. The text is still copied when the answer appears.</small></span></label>
+
+  <h2>After the text is copied</h2>
+  <fieldset id="afterBox">
+    <label class="row"><input type="radio" name="afterCopy" value="stay">
+      <span>Stay on the AI Mode tab <small>So you can read or follow up on the answer.</small></span></label>
+    <label class="row"><input type="radio" name="afterCopy" value="return">
+      <span>Go back to the page I came from and close the AI Mode tab</span></label>
+  </fieldset>
+  <p class="hint" id="afterNote">Only used in “New tab” mode. In side-panel mode you never leave your page; it just shows “copied ✓”.</p>
+
+  <div class="actions">
+    <button id="save" class="primary" type="button">Save</button>
+    <button id="reset" type="button">Reset everything</button>
+    <span id="saved"></span>
+  </div>
+</main>
+<script src="defaults.js"></script>
+<script src="options.js"></script>
+</body>
+</html>
