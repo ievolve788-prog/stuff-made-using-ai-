@@ -1,0 +1,1 @@
+bash -c 'F="$HOME/Pictures/Screenshot_$(date +%Y%m%d_%H%M%S).png"; gnome-screenshot -f "$F" && wl-copy -t image/png < "$F"'
