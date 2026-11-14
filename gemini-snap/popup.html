@@ -1,0 +1,25 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  body{width:270px;margin:0;padding:12px;font:13px system-ui,sans-serif;color:#1f2430}
+  h1{font-size:14px;margin:0 0 10px}
+  button{display:flex;justify-content:space-between;align-items:center;width:100%;margin-bottom:6px;padding:9px 11px;border:1px solid #c9ceda;background:#fff;border-radius:8px;font:inherit;cursor:pointer}
+  button:hover{background:#eef3fe;border-color:#4c8bf5}
+  kbd{font:11px ui-monospace,monospace;background:#eef0f5;border-radius:4px;padding:1px 5px;color:#555}
+  .small{font-size:12px;color:#666;display:flex;gap:6px}
+  .small button{margin:0;justify-content:center;padding:6px}
+  #msg{font-size:12px;color:#555;margin-top:8px;min-height:15px}
+</style></head>
+<body>
+  <h1>✨ Gemini Snap</h1>
+  <button id="region">Select area <kbd id="k1">Alt+Shift+G</kbd></button>
+  <button id="visible">Visible screen <kbd id="k2">Alt+Shift+V</kbd></button>
+  <button id="quick" style="border-color:#f9ab00;background:#fff8e6">⚡ Quick send (instant) <kbd id="k4">Alt+Shift+Q</kbd></button>
+  <button id="full">Full page (scroll) <kbd id="k3">Alt+Shift+F</kbd></button>
+  <div class="small">
+    <button id="log">Save debug log</button>
+    <button id="opts">Settings</button>
+  </div>
+  <div id="msg"></div>
+  <script src="popup.js"></script>
+</body></html>

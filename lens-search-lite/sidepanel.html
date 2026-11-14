@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lens Search Lite</title>
+  <style>
+    :root {
+      --bg: #ffffff; --fg: #202124; --muted: #5f6368; --line: #dadce0; --accent: #1a73e8; --bar: #f1f3f4;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #202124; --fg: #e8eaed; --muted: #9aa0a6; --line: #3c4043; --accent: #8ab4f8; --bar: #292a2d; }
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body { display: flex; flex-direction: column; background: var(--bg); color: var(--fg); font: 13px/1.45 system-ui, sans-serif; }
+    header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--bar); border-bottom: 1px solid var(--line); }
+    header strong { font-size: 13px; }
+    #status { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    header button, header a {
+      flex: none; padding: 3px 9px; border: 1px solid var(--line); border-radius: 6px; background: transparent;
+      color: var(--fg); font: inherit; cursor: pointer; text-decoration: none;
+    }
+    header button:hover, header a:hover { border-color: var(--accent); color: var(--accent); }
+    #idle { padding: 16px; overflow: auto; }
+    #idle h2 { margin: 0 0 8px; font-size: 15px; }
+    #idle ul { margin: 8px 0 12px; padding-left: 20px; }
+    #idle li { margin: 4px 0; }
+    #idle p { margin: 8px 0; color: var(--muted); }
+    #idle .note { color: #d93025; }
+    kbd { padding: 1px 5px; border: 1px solid var(--line); border-radius: 4px; font: 12px ui-monospace, Consolas, monospace; }
+    #frame { flex: 1; width: 100%; border: 0; background: #fff; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>Lens Search Lite</strong>
+    <span id="status"></span>
+    <button id="newtab" type="button" title="Open Google AI Mode in a normal tab">Open in tab</button>
+    <a id="settings" href="#" title="Settings">Settings</a>
+  </header>
+
+  <main id="idle">
+    <h2>Google AI Mode shows up here</h2>
+    <ul>
+      <li><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> — screenshot of the visible page → AI Mode with your prompt</li>
+      <li><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd> — drag a rectangle → AI Mode with your prompt</li>
+      <li><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> — just open AI Mode</li>
+    </ul>
+    <p id="why"></p>
+    <p>Prefer a normal tab? Settings → “Open AI Mode in” → New tab.</p>
+  </main>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

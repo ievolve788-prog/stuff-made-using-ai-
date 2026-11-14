@@ -1,0 +1,15 @@
+#__lens_area_overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  cursor: crosshair;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+#__lens_area_box {
+  position: fixed;
+  display: none;
+  border: 2px solid #4285f4;
+  background: rgba(66, 133, 244, 0.15);
+  pointer-events: none;
+}

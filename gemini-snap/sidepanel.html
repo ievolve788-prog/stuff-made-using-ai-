@@ -1,0 +1,16 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Gemini</title>
+<style>
+  html,body{margin:0;height:100%;font:12px system-ui,sans-serif;background:#fff;color:#1f2430}
+  body{display:flex;flex-direction:column}
+  header{display:flex;gap:6px;align-items:center;padding:4px 8px;border-bottom:1px solid #ddd}
+  header span{flex:1;opacity:.7} button{font:inherit;padding:3px 8px;border:1px solid #c9ceda;background:#fff;border-radius:6px;cursor:pointer}
+  button:hover{background:#eef3fe} iframe{flex:1;border:0;width:100%;min-height:0}
+  @media (prefers-color-scheme:dark){html,body{background:#1e1f24;color:#eee}header{border-color:#444}button{background:#2b2d33;color:#eee;border-color:#555}}
+</style></head>
+<body>
+  <header><span id="st">Gemini Snap</span><button id="reload">Reload</button><button id="tab">Open in tab</button><button id="cfg">⚙ Settings</button></header>
+  <iframe id="f" allow="clipboard-read; clipboard-write; microphone"></iframe>
+  <iframe id="s" style="display:none;background:#fff"></iframe>
+  <script src="sidepanel.js"></script>
+</body></html>

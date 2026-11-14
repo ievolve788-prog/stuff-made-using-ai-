@@ -1,0 +1,63 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Gemini Snap – Settings</title>
+<style>
+  body{max-width:760px;margin:24px auto;padding:0 16px;font:14px/1.45 system-ui,sans-serif;color:#1f2430}
+  h1{font-size:20px} h2{font-size:15px;margin:26px 0 8px}
+  .tpl{display:grid;grid-template-columns:200px 1fr auto;gap:8px;margin-bottom:8px;align-items:start}
+  input[type=text],textarea{width:100%;box-sizing:border-box;font:inherit;padding:7px;border:1px solid #c9ceda;border-radius:8px}
+  textarea{min-height:56px;resize:vertical}
+  button{font:inherit;padding:7px 12px;border:1px solid #c9ceda;background:#fff;border-radius:8px;cursor:pointer}
+  button:hover{background:#eef3fe} button.primary{background:#4c8bf5;color:#fff;border-color:#4c8bf5}
+  .row{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+  label.c{display:block;margin:6px 0}
+  pre{background:#101521;color:#cfe3ff;padding:10px;border-radius:8px;max-height:260px;overflow:auto;font-size:11.5px;white-space:pre-wrap}
+  .hint{color:#666;font-size:12px}
+  @media (max-width:560px){
+    body{margin:10px auto;padding:0 10px}
+    .tpl{grid-template-columns:1fr}
+    .tpl button{justify-self:start}
+  }
+</style></head>
+<body>
+  <h1>✨ Gemini Snap – Settings</h1>
+
+  <h2>Prompt templates</h2>
+  <p class="hint">These appear in the dropdown right after you take a screenshot (first 9 also work with keys 1–9).</p>
+  <div id="list"></div>
+  <div class="row">
+    <button id="add">+ Add template</button>
+    <button id="reset">Reset to defaults</button>
+  </div>
+
+  <h2>Quick send (⚡ Alt+Shift+Q)</h2>
+  <p class="hint">Captures the visible screen, sends it to Gemini and presses Enter automatically. This prompt is sent with it (leave empty to send the image alone).</p>
+  <textarea id="quickPrompt" placeholder="Prompt for quick send"></textarea>
+
+  <h2>Where to open Gemini</h2>
+  <select id="target">
+    <option value="sidepanel">Side panel (reuses one Gemini chat panel, no new tab)</option>
+    <option value="tab">New tab each time</option>
+  </select>
+  <p class="hint">Side panel needs you to be signed in to Gemini in a normal tab first. If the panel can't load Gemini, the extension falls back to a new tab automatically.</p>
+
+  <h2>Behaviour</h2>
+  <label class="c"><input type="checkbox" id="autoSubmit"> Auto-press send in Gemini (otherwise it stops so you can edit the prompt)</label>
+  <label class="c"><input type="checkbox" id="autoSaveLog"> Auto-write debug log to <code>Downloads/GeminiSnap/debug-log.txt</code> after every run (file is overwritten)</label>
+
+  <h2>Keyboard shortcuts</h2>
+  <div class="row"><button id="shortcuts">Customize shortcuts…</button></div>
+  <p class="hint">Opens chrome://extensions/shortcuts — change Alt/Cmd + Shift + G etc. there.</p>
+
+  <div class="row"><button class="primary" id="save">Save settings</button><span id="saved" class="hint"></span></div>
+
+  <h2>Debug log</h2>
+  <div class="row">
+    <button id="logSave">Write log to file now</button>
+    <button id="logView">Refresh preview</button>
+    <button id="logClear">Clear log</button>
+  </div>
+  <pre id="logBox">(click “Refresh preview”)</pre>
+
+  <script src="defaults.js"></script>
+  <script src="options.js"></script>
+</body></html>

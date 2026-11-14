@@ -1,0 +1,113 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body {
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        width: 230px;
+        padding: 12px;
+        margin: 0;
+      }
+      h1 {
+        font-size: 13px;
+        font-weight: 600;
+        margin: 0 0 10px 0;
+        color: #202124;
+      }
+      button {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        padding: 9px 10px;
+        margin-bottom: 8px;
+        border: 1px solid #dadce0;
+        border-radius: 6px;
+        background: #fff;
+        cursor: pointer;
+        font-size: 13px;
+        color: #202124;
+      }
+      button:hover {
+        background: #f1f3f4;
+      }
+      .kbd {
+        margin-left: auto;
+        font-size: 10px;
+        color: #5f6368;
+        background: #f1f3f4;
+        border: 1px solid #dadce0;
+        border-radius: 4px;
+        padding: 1px 5px;
+      }
+      a {
+        display: inline-block;
+        margin-top: 4px;
+        font-size: 11px;
+        color: #4285f4;
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      #dest-note {
+        font-size: 11px;
+        color: #5f6368;
+        margin: -4px 0 8px 0;
+      }
+      hr {
+        border: none;
+        border-top: 1px solid #e8eaed;
+        margin: 10px 0;
+      }
+      #debug-panel {
+        display: none;
+      }
+      #debug-log {
+        width: 100%;
+        height: 140px;
+        box-sizing: border-box;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 10px;
+        resize: vertical;
+      }
+      .debug-actions {
+        display: flex;
+        gap: 6px;
+        margin-top: 6px;
+      }
+      .debug-actions button {
+        margin-bottom: 0;
+        font-size: 11px;
+        padding: 6px;
+      }
+      #copy-status {
+        font-size: 10px;
+        color: #34a853;
+        margin-left: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Lens Search Lite</h1>
+    <div id="dest-note">Screenshot searches go to: <b id="dest-name">…</b></div>
+    <button id="btn-screen">Search full screen <span class="kbd">Alt+Shift+L</span></button>
+    <button id="btn-area">Select an area <span class="kbd">Alt+Shift+A</span></button>
+    <button id="btn-ai">AI Mode (chat) <span class="kbd">Alt+Shift+M</span></button>
+    <a href="#" id="settings-link">Settings (default prompt, AI Mode)</a><br />
+    <a href="#" id="shortcuts-link">Change keyboard shortcuts</a>
+    <hr />
+    <a href="#" id="toggle-debug">Show debug log</a>
+    <div id="debug-panel">
+      <textarea id="debug-log" readonly></textarea>
+      <div class="debug-actions">
+        <button id="copy-log">Copy debug log</button>
+        <button id="refresh-log">Refresh</button>
+        <button id="clear-log">Clear</button>
+        <span id="copy-status"></span>
+      </div>
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>

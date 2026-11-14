@@ -1,0 +1,183 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Lens Search Lite — Settings</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        max-width: 560px;
+        margin: 32px auto;
+        padding: 0 16px;
+        color: #202124;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0 0 4px 0;
+      }
+      .sub {
+        color: #5f6368;
+        font-size: 13px;
+        margin-bottom: 24px;
+      }
+      label.field {
+        display: block;
+        font-weight: 600;
+        font-size: 14px;
+        margin-bottom: 6px;
+      }
+      textarea {
+        width: 100%;
+        box-sizing: border-box;
+        height: 110px;
+        padding: 10px;
+        font: inherit;
+        font-size: 14px;
+        border: 1px solid #dadce0;
+        border-radius: 8px;
+        resize: vertical;
+      }
+      textarea:focus {
+        outline: 2px solid #4285f4;
+        border-color: transparent;
+      }
+      .hint {
+        font-size: 12px;
+        color: #5f6368;
+        margin: 6px 0 22px 0;
+        line-height: 1.5;
+      }
+      .toggle {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 12px;
+        border: 1px solid #dadce0;
+        border-radius: 8px;
+        margin-bottom: 8px;
+        cursor: pointer;
+      }
+      .toggle input {
+        margin-top: 3px;
+        width: 16px;
+        height: 16px;
+      }
+      .toggle .title {
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .toggle .desc {
+        font-size: 12px;
+        color: #5f6368;
+        margin-top: 2px;
+        line-height: 1.5;
+      }
+      .actions {
+        margin-top: 22px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      button {
+        padding: 9px 18px;
+        font-size: 14px;
+        border-radius: 6px;
+        border: 1px solid #dadce0;
+        background: #fff;
+        cursor: pointer;
+      }
+      button.primary {
+        background: #4285f4;
+        border-color: #4285f4;
+        color: #fff;
+      }
+      button:hover {
+        filter: brightness(0.96);
+      }
+      #status {
+        font-size: 13px;
+        color: #34a853;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Lens Search Lite — Settings</h1>
+    <div class="sub">Saved only in this browser. Nothing is sent anywhere except to Google itself.</div>
+
+    <label class="field" for="prompt">Default prompt</label>
+    <textarea id="prompt" placeholder="e.g. Quiz me on this. / Solve the question in this image and explain step by step."></textarea>
+    <div class="hint">
+      Sent together with your screenshot in AI Mode, and used by the <b>AI Mode</b> button (<code>Alt+Shift+M</code>)
+      when there is no screenshot. Leave it empty to attach just the image — nothing is ever auto-sent without a prompt.
+    </div>
+
+    <label class="field">When I take a screenshot search (<code>Alt+Shift+L</code> full screen, <code>Alt+Shift+A</code> area)</label>
+    <label class="toggle">
+      <input type="radio" name="dest" value="aimode" />
+      <div>
+        <div class="title">Send it straight to AI Mode</div>
+        <div class="desc">
+          Takes the screenshot, opens AI Mode (side panel or tab, see below), attaches the image, types your
+          default prompt and sends it. The answer shows up there. A small banner (bottom-right) tells you what it is doing.
+        </div>
+      </div>
+    </label>
+    <label class="toggle">
+      <input type="radio" name="dest" value="lens" />
+      <div>
+        <div class="title">Show Google Lens results</div>
+        <div class="desc">The original behaviour: the screenshot is searched with Google Lens.</div>
+      </div>
+    </label>
+
+    <label class="field">Open AI Mode in</label>
+    <label class="toggle">
+      <input type="radio" name="openIn" value="sidepanel" />
+      <div>
+        <div class="title">Side panel</div>
+        <div class="desc">
+          Chrome’s side panel next to the page you are on, so you keep your page in view. If Google can’t be shown
+          there, a new tab is opened automatically. Applies to the screenshot search and to the AI Mode button.
+        </div>
+      </div>
+    </label>
+    <label class="toggle">
+      <input type="radio" name="openIn" value="tab" />
+      <div>
+        <div class="title">New tab</div>
+        <div class="desc">Opens AI Mode in a new tab next to the current one.</div>
+      </div>
+    </label>
+
+    <label class="toggle">
+      <input type="checkbox" id="autoSend" />
+      <div>
+        <div class="title">AI Mode: press Send for me</div>
+        <div class="desc">
+          Off = the image and prompt are left in the box so you can edit the prompt and press Enter yourself.
+          It only sends when the image is verifiably attached; if the attach fails it never sends a text-only question.
+        </div>
+      </div>
+    </label>
+
+    <label class="toggle">
+      <input type="checkbox" id="autoAiMode" />
+      <div>
+        <div class="title">Lens results only: auto-click “AI Mode” afterwards</div>
+        <div class="desc">
+          Only applies when the option above is “Show Google Lens results”. After the Lens search the extension
+          types your prompt into the search box beside your image, then clicks Google’s own “AI Mode” tab. If the
+          prompt did not carry over it is typed and sent there (never twice).
+        </div>
+      </div>
+    </label>
+
+    <div class="actions">
+      <button class="primary" id="save">Save</button>
+      <button id="reset">Reset</button>
+      <span id="status"></span>
+    </div>
+
+    <script src="options.js"></script>
+  </body>
+</html>
