@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Typexpand settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <header>
+    <h1>Typexpand</h1>
+    <span id="status" aria-live="polite"></span>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>Settings</h2>
+      <label class="line"><input type="checkbox" id="enabled"> Enable expansion</label>
+
+      <label class="line">
+        Default insert mode
+        <select id="mode">
+          <option value="type">Type (simulate keystrokes) – recommended</option>
+          <option value="paste">Paste (insert instantly)</option>
+        </select>
+      </label>
+
+      <label class="line">
+        Typing delay
+        <input type="number" id="typeDelay" min="0" max="500" step="1"> ms per character
+      </label>
+
+      <label class="line"><input type="checkbox" id="keyEvents"> Fire keydown/keyup events while typing (helps with picky sites)</label>
+
+      <label class="block">
+        Disable on these sites (one hostname per line, e.g. <code>docs.google.com</code>)
+        <textarea id="excluded" rows="3" spellcheck="false"></textarea>
+      </label>
+
+      <p class="hint">
+        Clipboard hotkeys: <strong>Alt+Shift+V</strong> types the clipboard, <strong>Alt+Shift+B</strong> pastes it.
+        Change them at <code>chrome://extensions/shortcuts</code> (Chrome) or <em>Manage Extension Shortcuts</em> in <code>about:addons</code> (Firefox).
+        You can also right-click a text field.
+      </p>
+    </section>
+
+    <section class="card">
+      <div class="toolbar">
+        <h2>Snippets</h2>
+        <input type="search" id="filter" placeholder="Filter…">
+        <button id="add" class="primary">+ Add snippet</button>
+        <button id="export">Export</button>
+        <button id="import">Import</button>
+        <input type="file" id="file" accept="application/json,.json" hidden>
+      </div>
+      <div id="list"></div>
+      <p class="hint">
+        Variables: <code>{{date}}</code> <code>{{time}}</code> <code>{{datetime}}</code>
+        <code>{{date:DD/MM/YYYY}}</code> (tokens: YYYY YY MMMM MMM MM DD dddd ddd HH hh mm ss A)
+        <code>{{clipboard}}</code> <code>{{uuid}}</code> <code>{{cursor}}</code> (where the caret ends up).
+      </p>
+    </section>
+  </main>
+
+  <template id="row">
+    <div class="row">
+      <div class="row-top">
+        <input class="trigger" data-f="trigger" placeholder=":trigger" spellcheck="false">
+        <select data-f="mode" title="Insert mode for this snippet">
+          <option value="">Default mode</option>
+          <option value="type">Type</option>
+          <option value="paste">Paste</option>
+        </select>
+        <label title="Only expand at the start of a word"><input type="checkbox" data-f="word"> word</label>
+        <label><input type="checkbox" data-f="enabled"> on</label>
+        <button data-act="del" class="danger" title="Delete">Delete</button>
+      </div>
+      <textarea data-f="replace" rows="2" placeholder="Replacement text…" spellcheck="false"></textarea>
+    </div>
+  </template>
+
+  <script src="common.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>
