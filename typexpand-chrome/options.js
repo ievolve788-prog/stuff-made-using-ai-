@@ -19,7 +19,9 @@
   $('#mode').value = settings.mode;
   $('#typeDelay').value = settings.typeDelay;
   $('#keyEvents').checked = settings.keyEvents;
+  $('#passwordFields').checked = settings.passwordFields;
   $('#excluded').value = (settings.excludedSites || []).join('\n');
+  $('#passwordFields').onchange = (e) => { settings.passwordFields = e.target.checked; save(); };
 
   $('#enabled').onchange = (e) => { settings.enabled = e.target.checked; save(); };
   $('#mode').onchange = (e) => { settings.mode = e.target.value; save(); };

@@ -8,14 +8,26 @@
   let busy = false; // true while we are inserting text (ignores our own input events)
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const EXPAND_TYPES = new Set(['text', 'search', 'url', 'tel']);
-  const CLIPBOARD_TYPES = new Set(['text', 'search', 'url', 'tel', 'password', 'email', 'number']);
+  // Every text-like input type. Password fields are gated by settings.passwordFields.
+  const EXPAND_TYPES = new Set(['text', 'search', 'url', 'tel', 'email', 'number', 'password']);
+  const CLIPBOARD_TYPES = EXPAND_TYPES;
+
+  // Rolling buffer of what was just typed. It is the fallback for places where the
+  // text before the caret can't be read (email/number inputs, editors with odd DOM).
+  // It lives only in memory, holds at most the longest trigger's length, and is
+  // never stored or sent anywhere.
+  let buf = '';
+  let bufEl = null;
+  let maxLen = 0;
+  const resetBuf = () => { buf = ''; bufEl = null; };
 
   function refresh(d) {
     settings = d.settings;
     snippets = d.snippets
       .filter((s) => s.enabled !== false && s.trigger)
       .sort((a, b) => b.trigger.length - a.trigger.length); // longest trigger wins
+    maxLen = snippets.length ? snippets[0].trigger.length : 0;
+    resetBuf();
   }
   teLoad().then(refresh);
   api.storage.onChanged.addListener((_c, area) => {
@@ -207,40 +219,90 @@
     return i === 0 || !/[\p{L}\p{N}_]/u.test(text[i - 1]);
   }
 
-  async function expand(el, sn) {
+  // Context from the keystroke buffer: no caret access, so the trigger is removed
+  // by "backspacing" it (execCommand('delete') once per character).
+  function bufferCtx(el) {
+    if (bufEl !== el) return null;
+    return {
+      text: buf,
+      select: null,
+      backspace: (n) => {
+        for (let i = 0; i < n; i++) {
+          if (!document.execCommand('delete')) return false;
+        }
+        return true;
+      }
+    };
+  }
+
+  async function expand(el, sn, viaBuffer) {
     busy = true; // set synchronously, before any await
     try {
       const mode = sn.mode || settings.mode;
       const text = await teRender(sn.replace, () => readClipboard(el));
       if (!stillFocused(el)) return;
-      const ctx = getBefore(el); // re-read: focus juggling may have moved things
+      // Re-read: focus juggling may have moved things.
+      const ctx = viaBuffer ? bufferCtx(el) : getBefore(el);
       if (!ctx || !ctx.text.endsWith(sn.trigger)) return;
-      ctx.select(sn.trigger.length);
-      if (!document.execCommand('delete') && isTextControl(el)) {
-        el.setRangeText('', el.selectionStart, el.selectionEnd, 'end');
+      const len = Array.from(sn.trigger).length;
+      if (viaBuffer) {
+        if (!ctx.backspace(len)) return;
+      } else {
+        ctx.select(sn.trigger.length);
+        if (!document.execCommand('delete') && isTextControl(el)) {
+          el.setRangeText('', el.selectionStart, el.selectionEnd, 'end');
+        }
       }
+      resetBuf();
       await emit(el, text, mode);
     } catch (e) {
       console.warn('[Typexpand]', e);
     } finally {
       busy = false;
+      resetBuf();
     }
+  }
+
+  function skipEl(el) {
+    return el instanceof HTMLInputElement && el.type === 'password' && !settings.passwordFields;
   }
 
   document.addEventListener(
     'input',
     (e) => {
-      if (!e.isTrusted || busy || !settings.enabled || e.inputType !== 'insertText') return;
-      if (!snippets.length || excluded()) return;
+      if (!e.isTrusted || busy || !settings.enabled || !maxLen) return;
+      if (excluded()) return;
       const el = e.composedPath()[0];
-      if (!(el instanceof HTMLElement)) return;
+      if (!(el instanceof HTMLElement) || skipEl(el)) return;
+
+      // Keep the rolling buffer up to date.
+      if (e.inputType === 'insertText' && e.data) {
+        if (bufEl !== el) { buf = ''; bufEl = el; }
+        buf = (buf + e.data).slice(-maxLen);
+      } else if (e.inputType === 'deleteContentBackward' && bufEl === el) {
+        buf = buf.slice(0, -1);
+      } else {
+        resetBuf();
+      }
+      if (e.inputType !== 'insertText') return;
+
+      // Preferred: read the text before the caret. Fallback: the buffer.
       const ctx = getBefore(el);
-      if (!ctx) return;
-      const sn = snippets.find((s) => ctx.text.endsWith(s.trigger) && (!s.word || boundaryOk(ctx.text, s.trigger)));
-      if (sn) expand(el, sn);
+      const viaBuffer = !ctx;
+      const c = ctx || bufferCtx(el);
+      if (!c) return;
+      const sn = snippets.find((s) => c.text.endsWith(s.trigger) && (!s.word || boundaryOk(c.text, s.trigger)));
+      if (sn) expand(el, sn, viaBuffer);
     },
     true
   );
+
+  // Anything that moves the caret invalidates the buffer.
+  document.addEventListener('keydown', (e) => {
+    if (e.isTrusted && /^(Arrow|Home$|End$|Page|Tab$|Enter$|Escape$|Delete$)/.test(e.key)) resetBuf();
+  }, true);
+  document.addEventListener('mousedown', resetBuf, true);
+  document.addEventListener('focusin', resetBuf, true);
 
   /* ---------- clipboard commands (hotkey / context menu) ---------- */
 

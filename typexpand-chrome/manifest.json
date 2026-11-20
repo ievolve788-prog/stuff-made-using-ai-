@@ -1,19 +1,27 @@
 {
   "manifest_version": 3,
   "name": "Typexpand",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Espanso-style text expander for the browser. Types (or pastes) snippets when you type a trigger, and can type your clipboard.",
-  "permissions": ["storage", "clipboardRead", "contextMenus"],
+  "permissions": [
+    "storage",
+    "clipboardRead",
+    "contextMenus"
+  ],
   "background": {
-    "service_worker": "background.js",
-    "scripts": ["background.js"]
+    "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "<all_urls>"
+      ],
       "all_frames": true,
       "match_about_blank": true,
-      "js": ["common.js", "content.js"],
+      "js": [
+        "common.js",
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
@@ -31,11 +39,15 @@
   },
   "commands": {
     "type-clipboard": {
-      "suggested_key": { "default": "Alt+Shift+V" },
+      "suggested_key": {
+        "default": "Alt+Shift+V"
+      },
       "description": "Type the clipboard contents (keystroke by keystroke)"
     },
     "paste-clipboard": {
-      "suggested_key": { "default": "Alt+Shift+B" },
+      "suggested_key": {
+        "default": "Alt+Shift+B"
+      },
       "description": "Paste the clipboard contents instantly"
     }
   },
@@ -44,11 +56,5 @@
     "32": "icons/icon32.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  },
-  "browser_specific_settings": {
-    "gecko": {
-      "id": "typexpand@local",
-      "strict_min_version": "121.0"
-    }
   }
 }

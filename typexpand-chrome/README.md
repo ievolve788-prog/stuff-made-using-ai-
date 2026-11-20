@@ -9,13 +9,17 @@ globally or per snippet.
 
 ## Install
 
-**Chrome / Edge / Brave:** open `chrome://extensions`, enable *Developer mode*, click
-*Load unpacked* and select this folder.
+**Chrome / Edge / Brave:** unzip `typexpand-chrome.zip`, open `chrome://extensions`, enable
+*Developer mode*, click *Load unpacked* and select the unzipped folder.
 
-**Firefox:** open `about:debugging#/runtime/this-firefox`, click *Load Temporary Add-on* and
-select `manifest.json`. Temporary add-ons are removed when Firefox closes. For a permanent
+**Firefox:** unzip `typexpand-firefox.zip`, open `about:debugging#/runtime/this-firefox`,
+click *Load Temporary Add-on* and select `manifest.json` inside it. Temporary add-ons are removed when Firefox closes. For a permanent
 install, either sign it through addons.mozilla.org (unlisted) or use Firefox Developer
 Edition / Nightly with `xpinstall.signatures.required` set to `false` and install the zip.
+
+The two builds differ only in `manifest.json` (Chrome needs a `service_worker`, Firefox needs
+`scripts`). In the source folder, `manifest.json` is the Chrome one and
+`manifest.firefox.json` is the Firefox one.
 
 ## Using it
 
@@ -39,10 +43,18 @@ object with a `matches` array of `{trigger, replace}` also works. Espanso's YAML
 
 ## Limits
 
-- Works in `<input>` (text/search/url/tel), `<textarea>` and `contenteditable` editors.
-  Not in password fields (by design), email/number inputs (no caret API), or canvas editors
-  such as Google Docs. Add such sites to the exclusion list or use the clipboard hotkeys.
-- Extensions cannot run on browser pages (`chrome://`, `about:`, the Chrome Web Store,
-  addons.mozilla.org) or in the built-in PDF viewer.
+- Works in every `<input>` type that takes text (text, search, url, tel, email, number,
+  password), `<textarea>`, and `contenteditable` editors, including inside iframes and
+  shadow DOM. Where the caret position can't be read (email/number inputs, unusual editors)
+  it falls back to a small in-memory keystroke buffer and removes the trigger by
+  backspacing it. Password-field expansion can be switched off in settings.
+- Number inputs only accept digits and a few symbols, so triggers there must be made of
+  those characters (a trigger like `:x` can't even be typed into them).
+- Not guaranteed: editors that handle keys themselves and bypass normal input events
+  (Google Docs and other canvas editors, some web terminals / remote desktops). Use the
+  clipboard hotkeys there, or exclude the site. Untested by me in real browsers.
+- Browsers do not let any extension run on their own pages (`chrome://`, `about:`, the
+  Chrome Web Store, addons.mozilla.org), the built-in PDF viewer, or the OS/browser
+  password prompts and address bar. This cannot be changed from an extension.
 - Trigger matching is case-sensitive and happens within a single text node.
 - Settings are stored locally (`storage.local`), not synced.

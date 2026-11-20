@@ -6,6 +6,7 @@ const TE_DEFAULT_SETTINGS = {
   mode: 'type',        // 'type' (default) or 'paste'
   typeDelay: 8,        // ms between typed characters
   keyEvents: true,     // fire keydown/keyup around each typed character
+  passwordFields: true, // also expand inside password fields
   excludedSites: []    // hostnames where expansion is disabled
 };
 
