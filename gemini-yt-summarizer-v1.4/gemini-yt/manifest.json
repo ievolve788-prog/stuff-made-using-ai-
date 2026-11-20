@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Gemini YouTube Summarizer",
+  "version": "1.4",
+  "description": "Adds a small Gemini button to YouTube thumbnails. Click it to summarise the video in a Gemini side window without opening the video.",
+  "permissions": ["storage", "clipboardWrite"],
+  "action": {
+    "default_title": "Gemini YouTube Summarizer",
+    "default_popup": "popup.html"
+  },
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["debug.js", "youtube.js"],
+      "css": ["youtube.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://gemini.google.com/*"],
+      "js": ["debug.js", "gemini.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

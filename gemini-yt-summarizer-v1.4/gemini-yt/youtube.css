@@ -1,0 +1,44 @@
+/* Overlay layer: fixed, full-viewport, above everything, ignores the mouse
+   except on the tabs themselves. */
+#gsum-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+}
+
+/* Blue tab sitting just LEFT of each thumbnail (never touching it). */
+.gsum-tab {
+  position: absolute;
+  width: 10px;
+  height: 38px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 8px 0 0 8px;
+  background: #3b9cff;
+  cursor: pointer;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  transition: width 0.15s ease, background 0.15s ease;
+}
+.gsum-tab:hover,
+.gsum-tab:focus {
+  width: 26px;
+  background: #1f7fe0;
+}
+.gsum-tab svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s ease;
+}
+.gsum-tab:hover svg,
+.gsum-tab:focus svg {
+  opacity: 1;
+}

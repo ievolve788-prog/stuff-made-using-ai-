@@ -1,0 +1,78 @@
+{
+  "manifest_version": 3,
+  "name": "Lens AI Toolkit",
+  "version": "2.0.0",
+  "description": "Google Lens + Google AI Mode toolkit: search a screenshot or area, hover an image or select an area to copy its exact text, side-panel chat, prompt history. Every feature has its own switch. No tracking, no paywall.",
+  "minimum_chrome_version": "116",
+  "permissions": ["storage", "clipboardWrite", "contextMenus", "sidePanel", "declarativeNetRequest", "scripting", "offscreen"],
+  "host_permissions": ["<all_urls>"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Lens AI Toolkit",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "commands": {
+    "search_screen": {
+      "suggested_key": { "default": "Alt+Shift+L" },
+      "description": "Search the visible page (screenshot) with Google Lens / AI Mode"
+    },
+    "search_area": {
+      "suggested_key": { "default": "Alt+Shift+S" },
+      "description": "Select an area and search it with Google Lens / AI Mode"
+    },
+    "open_ai_mode": {
+      "suggested_key": { "default": "Alt+Shift+M" },
+      "description": "Open Google AI Mode"
+    },
+    "copy_area_text": {
+      "suggested_key": { "default": "Alt+Shift+K" },
+      "description": "Select an area and copy the exact text in it"
+    },
+    "scroll_capture": {
+      "description": "Capture the whole page (scrolling) and send it to AI Mode"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["settings.js", "log.js", "page-ui.js"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.google.com/*", "https://gemini.google.com/*"],
+      "js": ["textutil.js", "log.js", "ai-task.js"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.google.com/*", "https://lens.google.com/*"],
+      "js": ["log.js", "lens-inject.js", "lens-follow.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

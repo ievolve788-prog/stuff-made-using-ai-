@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { font: 13px system-ui, sans-serif; width: 270px; margin: 0; padding: 14px; }
+  h1 { font-size: 14px; margin: 0 0 10px; }
+  label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+  small { display: block; color: #666; margin-top: 2px; }
+  .row { display: flex; gap: 6px; margin-top: 12px; }
+  button { flex: 1; padding: 6px 8px; cursor: pointer; }
+  #status { margin-top: 8px; color: #0a7; min-height: 1em; }
+</style>
+</head>
+<body>
+  <h1>Gemini YouTube Summarizer</h1>
+  <label>
+    <input type="checkbox" id="debug">
+    <span>Debug log auto-copied to clipboard
+      <small>Copies the log after each summary click.</small></span>
+  </label>
+  <div class="row">
+    <button id="copy">Copy log now</button>
+    <button id="clear">Clear log</button>
+  </div>
+  <div id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Lens AI Toolkit</title>
+  <style>
+    :root { color-scheme: light dark; --bg:#fff; --fg:#202124; --muted:#5f6368; --line:#dadce0; --blue:#1a73e8; --green:#188038; --red:#d93025; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#202124; --fg:#e8eaed; --muted:#9aa0a6; --line:#3c4043; --blue:#8ab4f8; --green:#81c995; --red:#f28b82; } }
+    * { box-sizing: border-box; }
+    body { width: 330px; margin: 0; padding: 12px; background: var(--bg); color: var(--fg); font: 13px/1.4 system-ui, sans-serif; }
+    h1 { font-size: 14px; margin: 0 0 8px; display: flex; justify-content: space-between; align-items: baseline; }
+    h1 small { color: var(--muted); font-weight: 400; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    button { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; cursor: pointer; text-align: left; }
+    button:hover { border-color: var(--blue); }
+    button.wide { grid-column: 1 / -1; }
+    button small { display: block; color: var(--muted); font-size: 11px; }
+    .sec { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+    label.t { display: flex; align-items: center; gap: 8px; padding: 2px 0; cursor: pointer; }
+    #msg { min-height: 1.2em; color: var(--green); margin-top: 6px; font-size: 12px; }
+    #st { margin-top: 6px; font-size: 12px; color: var(--muted); word-break: break-word; }
+    #st.ok { color: var(--green); } #st.bad { color: var(--red); }
+    textarea { display: none; width: 100%; height: 110px; margin-top: 6px; font: 11px/1.3 ui-monospace, monospace; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+    .links { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+    .links button { padding: 3px 8px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Lens AI Toolkit <small id="ver"></small></h1>
+
+  <div class="grid">
+    <button id="areaText" title="Alt+Shift+K">✂ Copy text of an area<small>Alt+Shift+K</small></button>
+    <button id="area" title="Alt+Shift+S">▭ Search an area<small>Alt+Shift+S</small></button>
+    <button id="screen" title="Alt+Shift+L">▣ Search this page<small>Alt+Shift+L</small></button>
+    <button id="scroll" title="Scroll and stitch the whole page">↕ Whole page<small>scrolling capture</small></button>
+    <button id="openAi" title="Alt+Shift+M">✦ Open AI Mode<small>Alt+Shift+M</small></button>
+    <button id="panel" title="Open the side panel (chat + history)">▤ Side panel<small>chat · history</small></button>
+  </div>
+
+  <div class="sec">
+    <label class="t"><input type="checkbox" id="qHistory"> Prompt history</label>
+    <label class="t"><input type="checkbox" id="qReuse"> Add screenshots to the open chat</label>
+    <label class="t"><input type="checkbox" id="qAreaText"> Area → text → copy</label>
+    <label class="t"><input type="checkbox" id="qHover"> Hover button on images</label>
+    <div class="links"><button id="settings">All settings…</button></div>
+  </div>
+
+  <div class="sec">
+    <div class="links" style="margin-top:0">
+      <button id="selfTest" title="Sends a picture with known text through your current setup and checks the answer">Self-test</button>
+      <button id="copyLog">Copy debug log</button>
+      <button id="showLog">Show</button>
+      <button id="clearLog">Clear</button>
+    </div>
+    <div id="st"></div>
+    <textarea id="log" readonly></textarea>
+  </div>
+  <div id="msg"></div>
+
+  <script src="settings.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

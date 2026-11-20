@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lens AI Toolkit</title>
+  <style>
+    :root { color-scheme: light dark; --bg:#fff; --fg:#202124; --muted:#5f6368; --line:#dadce0; --card:#f8f9fa; --blue:#1a73e8; --green:#188038; --red:#d93025; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#202124; --fg:#e8eaed; --muted:#9aa0a6; --line:#3c4043; --card:#2d2e31; --blue:#8ab4f8; --green:#81c995; --red:#f28b82; } }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body { display: flex; flex-direction: column; background: var(--bg); color: var(--fg); font: 13px/1.4 system-ui, sans-serif; }
+    header { flex: none; padding: 8px 10px 6px; border-bottom: 1px solid var(--line); background: var(--card); }
+    .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .row + .row { margin-top: 6px; }
+    h1 { font-size: 13px; margin: 0; font-weight: 600; flex: none; }
+    #status { flex: 1; min-width: 0; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+    button { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; cursor: pointer; }
+    button:hover { border-color: var(--blue); }
+    button.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+    button.on { border-color: var(--blue); color: var(--blue); }
+    button.danger:hover { border-color: var(--red); color: var(--red); }
+    label.sw { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; cursor: pointer; margin-left: auto; }
+    main { position: relative; flex: 1; min-height: 0; }
+    #frameWrap, #frameWrap iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #fff; }
+    #idle { position: absolute; inset: 0; padding: 22px 18px; color: var(--muted); }
+    #idle h2 { color: var(--fg); font-size: 15px; margin: 0 0 8px; }
+    #idle p { margin: 6px 0; }
+    .overlay { position: absolute; inset: 0; background: var(--bg); overflow: auto; padding: 10px; display: none; z-index: 5; }
+    .overlay.show { display: block; }
+    /* picker */
+    #thumb { max-width: 100%; max-height: 150px; display: block; margin: 0 auto 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+    .preset { display: flex; width: 100%; align-items: center; gap: 8px; text-align: left; padding: 8px 10px; margin-bottom: 6px; }
+    .preset kbd { flex: none; min-width: 18px; text-align: center; font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; color: var(--muted); }
+    .preset .nm { flex: 1; }
+    .preset .tg { color: var(--muted); font-size: 11px; }
+    textarea { width: 100%; min-height: 64px; padding: 7px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); font: inherit; resize: vertical; }
+    .hint { color: var(--muted); font-size: 12px; margin: 4px 0 8px; }
+    /* history */
+    #hList { margin-top: 8px; }
+    .hItem { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; background: var(--card); }
+    .hText { white-space: pre-wrap; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+    .hText.open { -webkit-line-clamp: unset; }
+    .hMeta { color: var(--muted); font-size: 11.5px; margin: 5px 0; }
+    .hBtns { display: flex; gap: 6px; flex-wrap: wrap; }
+    .tag { display: inline-block; padding: 0 6px; border-radius: 8px; border: 1px solid var(--line); margin-right: 4px; }
+    input[type=search], select { font: inherit; color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; }
+    #hSearch { flex: 1; min-width: 0; }
+    .empty { color: var(--muted); text-align: center; padding: 24px 8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="row">
+      <h1>Lens AI Toolkit</h1>
+      <span id="status" title=""></span>
+    </div>
+    <div class="row">
+      <button id="bAreaText" title="Select an area and copy its text">✂ Text</button>
+      <button id="bArea" title="Select an area and search it">▭ Area</button>
+      <button id="bScreen" title="Send a screenshot of the page behind this panel">▣ Screen</button>
+      <button id="bPage" title="Capture the whole page (scrolling)">↕ Page</button>
+      <button id="bHistory" title="Prompt history">🕘 History</button>
+    </div>
+    <div class="row">
+      <button id="bNew" title="Start a fresh AI Mode chat">New chat</button>
+      <button id="bSettings" title="All settings and switches">Settings</button>
+      <label class="sw" title="On: a new screenshot is added to the chat that is open here. Off: every screenshot starts a new chat."><input type="checkbox" id="reuse"> add to this chat</label>
+    </div>
+  </header>
+
+  <main>
+    <div id="idle">
+      <h2>Google AI Mode, next to your page</h2>
+      <p>Hover an image and click its blue button, press <b>Alt+Shift+K</b> to select an area and copy its text, or <b>Alt+Shift+S</b> to search an area. The result shows up here.</p>
+      <p>Opening AI Mode…</p>
+    </div>
+    <div id="frameWrap"></div>
+
+    <div id="picker" class="overlay">
+      <img id="thumb" alt="">
+      <div class="hint">What should Google do with this image? <span style="opacity:.8">(press 1–9)</span></div>
+      <div id="presets"></div>
+      <div class="hint" style="margin-top:10px">Or write your own question:</div>
+      <textarea id="custom" placeholder="e.g. What is the total on this receipt?"></textarea>
+      <div class="row" style="margin-top:6px">
+        <label class="sw" style="margin-left:0"><input type="checkbox" id="customExtract"> copy the answer to the clipboard (as exact text)</label>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="customSend" class="primary">Send</button>
+        <button id="pickCancel" class="danger">Cancel</button>
+      </div>
+    </div>
+
+    <div id="history" class="overlay">
+      <div class="row">
+        <input type="search" id="hSearch" placeholder="Search your prompts…">
+        <select id="hFilter" title="Which prompts to show">
+          <option value="all">All</option>
+          <option value="mine">Mine (typed / custom)</option>
+        </select>
+        <button id="hClose">Close</button>
+      </div>
+      <div id="hOff" class="hint" style="display:none">Prompt history is switched off, so nothing new is being saved. <button id="hTurnOn">Switch it on</button></div>
+      <div id="hList"></div>
+      <div class="row" style="margin-top:8px">
+        <button id="hClear" class="danger">Clear all</button>
+        <button id="hMore">Open in settings</button>
+      </div>
+    </div>
+  </main>
+
+  <script src="settings.js"></script>
+  <script src="log.js"></script>
+  <script src="textutil.js"></script>
+  <script src="sidepanel.js"></script>
+</body>
+</html>
