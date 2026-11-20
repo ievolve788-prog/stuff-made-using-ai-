@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Typexpand",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Espanso-style text expander for the browser. Types (or pastes) snippets when you type a trigger, and can type your clipboard.",
   "permissions": [
     "storage",
     "clipboardRead",
-    "contextMenus"
+    "contextMenus",
+    "offscreen"
   ],
   "background": {
     "service_worker": "background.js"

@@ -105,7 +105,16 @@
 
   async function readClipboard(el) {
     let text = null;
-    // Preferred: execCommand('paste') into a hidden textarea. Works with the
+    // Best: ask the extension's background to read it. The page (and any script
+    // that blocks pasting on it) never sees a paste event.
+    try {
+      const r = await api.runtime.sendMessage({ type: 'readClipboard' });
+      if (r && typeof r.text === 'string') {
+        if (el && el.focus && !stillFocused(el)) el.focus({ preventScroll: true });
+        return r.text.split(CURSOR_MARK).join('');
+      }
+    } catch (_) { /* fall back to reading it from the page */ }
+    // Fallback: execCommand('paste') into a hidden textarea. Works with the
     // clipboardRead permission in both Chrome and Firefox without a page prompt.
     try {
       const sel = window.getSelection();

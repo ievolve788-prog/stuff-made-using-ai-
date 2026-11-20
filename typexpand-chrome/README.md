@@ -41,6 +41,14 @@ The two builds differ only in `manifest.json` (Chrome needs a `service_worker`, 
 JSON only: `{ "snippets": [ { "trigger": ":x", "replace": "..." } ] }`. A bare array or an
 object with a `matches` array of `{trigger, replace}` also works. Espanso's YAML is not parsed.
 
+## Sites that block pasting
+
+Typing the clipboard (`Alt+Shift+V`, `:clip`, any snippet) works on sites that block paste,
+because it never uses the page's paste event: the clipboard is read in the extension's own
+background and the text is then entered as ordinary keystrokes. Paste mode is also not a
+paste event. Sites that actively detect synthetic or machine-speed typing can still object;
+raise the typing delay in settings if that happens.
+
 ## Limits
 
 - Works in every `<input>` type that takes text (text, search, url, tel, email, number,
