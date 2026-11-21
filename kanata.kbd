@@ -4,7 +4,7 @@
 )
 
 (defsrc
-  grv lctl lsft lmet lalt ralt rctl rsft caps spc w e a s d f g x c v h j k l , u i o pgdn mwu mwd mlft mrgt
+  grv f1 f2 lctl lsft lmet lalt ralt rctl rsft caps spc w e a s d f g x c v h j k l , u i o pgdn mwu mwd mlft mrgt
 )
 
 (defvar
@@ -12,6 +12,12 @@
 )
 
 (defalias
+  ;; --- F1 and F2 Clipboard Shortcuts ---
+  ;; Tap = Copy (C-c), Hold = Normal F1
+  f1-copy (tap-hold-press 150 200 C-c f1)
+  ;; Tap = Paste (C-v), Hold = Normal F2
+  f2-paste (tap-hold-press 150 200 C-v f2)
+
   ;; --- Grave Key Dual-Role ---
   ;; Tap = Right Click (mrgt), Hold = Normal Grave/Backtick (grv)
   grv-rclick (tap-hold-press 150 200 mrgt grv)
@@ -59,28 +65,28 @@
   )
 )
 
-;; Primary Base Layer (33 items)
+;; Primary Base Layer (35 items)
 (deflayer base
-  @grv-rclick @os-lctl @os-lsft @os-lmet @os-lalt @ralt-copy-cut @rctl-vol @os-rsft mlft @spc-mouse w e a s d f g x c v h j k l , u i o @pgdn-action mwu mwd mlft mrgt
+  @grv-rclick @f1-copy @f2-paste @os-lctl @os-lsft @os-lmet @os-lalt @ralt-copy-cut @rctl-vol @os-rsft mlft @spc-mouse w e a s d f g x c v h j k l , u i o @pgdn-action mwu mwd mlft mrgt
 )
 
-;; Dedicated Mouse, Navigation & Clipboard Layer (Active ONLY while holding Spacebar) (33 items)
+;; Dedicated Mouse, Navigation & Clipboard Layer (Active ONLY while holding Spacebar) (35 items)
 ;; W / E = Scroll Up / Down
 ;; A = esc, S = Left Click, D = Right Click, F = ret, G = Toggle Drag
 ;; X = Cut, C = Copy, V = Paste
 ;; H / J / K / L = Arrow keys
 (deflayer mouse
-  _ _ _ _ _ _ _ _ _ _ @mau @mad esc mlft mrgt ret @toggle-drag C-x C-c C-v left down up rght _ _ _ _ _ _ _ _ _
+  _ _ _ _ _ _ _ _ _ _ _ _ @mau @mad esc mlft mrgt ret @toggle-drag C-x C-c C-v left down up rght _ _ _ _ _ _ _ _ _
 )
 
-;; Dedicated Volume Control Layer (Active ONLY while holding Right Ctrl) (33 items)
+;; Dedicated Volume Control Layer (Active ONLY while holding Right Ctrl) (35 items)
 (deflayer volume
-  _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ volu voldwn _ _
+  _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ volu voldwn _ _
 )
 
-;; 100% Normal Keyboard Layer (Zero Kanata Remappings / Pure Passthrough) (33 items)
+;; 100% Normal Keyboard Layer (Zero Kanata Remappings / Pure Passthrough) (35 items)
 (deflayer passthrough
-  grv lctl lsft lmet lalt ralt rctl rsft caps spc w e a s d f g x c v h j k l , u i o pgdn mwu mwd mlft mrgt
+  grv f1 f2 lctl lsft lmet lalt ralt rctl rsft caps spc w e a s d f g x c v h j k l , u i o pgdn mwu mwd mlft mrgt
 )
 
 (defvirtualkeys
