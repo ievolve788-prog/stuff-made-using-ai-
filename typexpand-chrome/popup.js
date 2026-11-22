@@ -7,6 +7,15 @@
     await api.storage.local.set({ settings: { ...TE_DEFAULT_SETTINGS, ...(d.settings || {}), enabled: box.checked } });
   };
 
+  document.getElementById('copylog').onclick = async (e) => {
+    try {
+      await navigator.clipboard.writeText(await teBuildLogText());
+      e.target.textContent = 'Copied. Paste it into the chat';
+    } catch (_) {
+      e.target.textContent = 'Copy failed: use the settings page';
+    }
+  };
+
   document.getElementById('open').onclick = () => {
     api.runtime.openOptionsPage();
     window.close();

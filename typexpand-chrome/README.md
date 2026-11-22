@@ -49,6 +49,15 @@ background and the text is then entered as ordinary keystrokes. Paste mode is al
 paste event. Sites that actively detect synthetic or machine-speed typing can still object;
 raise the typing delay in settings if that happens.
 
+## Troubleshooting
+
+If something doesn't work on a page, press **Alt+Shift+L** there (or click *Copy debug log* in
+the toolbar popup or the settings page). That copies a report to your clipboard, ready to paste
+into a chat or bug report. Nothing is ever sent automatically. The log records only what
+happened (which step ran, field type, lengths, success/failure), never clipboard contents or
+the text you typed. It keeps the last 300 events locally and can be switched off or cleared in
+settings.
+
 ## Limits
 
 - Works in every `<input>` type that takes text (text, search, url, tel, email, number,

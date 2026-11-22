@@ -7,6 +7,7 @@ const TE_DEFAULT_SETTINGS = {
   typeDelay: 8,        // ms between typed characters
   keyEvents: true,     // fire keydown/keyup around each typed character
   passwordFields: true, // also expand inside password fields
+  debugLog: true,      // keep a small local diagnostic log (never contains clipboard or typed text)
   excludedSites: []    // hostnames where expansion is disabled
 };
 
@@ -27,6 +28,28 @@ async function teLoad() {
     settings: { ...TE_DEFAULT_SETTINGS, ...(d.settings || {}) },
     snippets: Array.isArray(d.snippets) ? d.snippets : JSON.parse(JSON.stringify(TE_DEFAULT_SNIPPETS))
   };
+}
+
+// Diagnostic report: versions, settings summary and the recent log entries.
+// Entries hold lengths and element descriptions only, never clipboard or typed text.
+async function teBuildLogText() {
+  const man = api.runtime.getManifest();
+  const d = await api.storage.local.get(['debugLog', 'settings', 'snippets']);
+  const s = { ...TE_DEFAULT_SETTINGS, ...(d.settings || {}) };
+  const head = [
+    `Typexpand ${man.version} debug log`,
+    `Browser: ${navigator.userAgent}`,
+    `Settings: enabled=${s.enabled} mode=${s.mode} delay=${s.typeDelay} keyEvents=${s.keyEvents} ` +
+      `password=${s.passwordFields} logging=${s.debugLog} excludedSites=${(s.excludedSites || []).length}`,
+    `Snippets: ${Array.isArray(d.snippets) ? d.snippets.length : 'defaults'}`,
+    'Clipboard contents and typed text are never logged, only lengths.',
+    ''
+  ];
+  const lines = (d.debugLog || []).map((e) => {
+    const { t, ...rest } = e;
+    return new Date(t).toISOString().slice(11, 23) + ' ' + JSON.stringify(rest);
+  });
+  return head.concat(lines.length ? lines : ['(no entries yet)']).join('\n');
 }
 
 const TE_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',

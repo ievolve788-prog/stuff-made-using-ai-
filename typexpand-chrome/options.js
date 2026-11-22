@@ -140,5 +140,26 @@
     }
   };
 
+  /* ---- troubleshooting ---- */
+  $('#debugLog').checked = settings.debugLog !== false;
+  $('#debugLog').onchange = (e) => { settings.debugLog = e.target.checked; save(); };
+  $('#logCopy').onclick = async () => {
+    const text = await teBuildLogText();
+    try {
+      await navigator.clipboard.writeText(text);
+      status('Log copied. Paste it into the chat.');
+    } catch (_) {
+      const v = $('#logView');
+      v.hidden = false;
+      v.value = text;
+      v.select();
+      status('Copy failed: select all in the box below and copy it.');
+    }
+  };
+  $('#logClear').onclick = async () => {
+    await api.storage.local.set({ debugLog: [] });
+    status('Log cleared');
+  };
+
   render();
 })();

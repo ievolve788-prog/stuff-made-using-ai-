@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Typexpand",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Espanso-style text expander for the browser. Types (or pastes) snippets when you type a trigger, and can type your clipboard.",
   "permissions": [
     "storage",
     "clipboardRead",
     "contextMenus",
-    "offscreen"
+    "offscreen",
+    "clipboardWrite"
   ],
   "background": {
     "service_worker": "background.js"
@@ -50,6 +51,12 @@
         "default": "Alt+Shift+B"
       },
       "description": "Paste the clipboard contents instantly"
+    },
+    "copy-log": {
+      "suggested_key": {
+        "default": "Alt+Shift+L"
+      },
+      "description": "Copy the Typexpand debug log to the clipboard"
     }
   },
   "icons": {

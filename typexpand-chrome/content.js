@@ -8,6 +8,35 @@
   let busy = false; // true while we are inserting text (ignores our own input events)
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  let insFails = 0; // insertText calls that the page/browser refused during one emit
+
+  // Diagnostic log: sent to the background, which keeps the last 300 entries.
+  // Only lengths and element descriptions are logged, never clipboard or typed text.
+  function dbg(ev, data) {
+    if (settings.debugLog === false) return;
+    try {
+      Promise.resolve(api.runtime.sendMessage({
+        type: 'log',
+        entry: { t: Date.now(), src: window === window.top ? 'top' : 'frame', host: location.hostname, ev, ...data }
+      })).catch(() => {});
+    } catch (_) { /* extension context gone */ }
+  }
+
+  function describe(el) {
+    if (!el || !el.getAttribute) return null;
+    const root = el.getRootNode && el.getRootNode();
+    return {
+      tag: el.tagName,
+      type: el.type || undefined,
+      role: el.getAttribute('role') || undefined,
+      id: el.id ? String(el.id).slice(0, 40) : undefined,
+      editable: !!el.isContentEditable,
+      readOnly: !!el.readOnly,
+      disabled: !!el.disabled,
+      shadow: root instanceof ShadowRoot,
+      inDialog: !!(el.closest && el.closest('dialog,[role=dialog],[aria-modal=true]'))
+    };
+  }
   // Every text-like input type. Password fields are gated by settings.passwordFields.
   const EXPAND_TYPES = new Set(['text', 'search', 'url', 'tel', 'email', 'number', 'password']);
   const CLIPBOARD_TYPES = EXPAND_TYPES;
@@ -110,33 +139,46 @@
     try {
       const r = await api.runtime.sendMessage({ type: 'readClipboard' });
       if (r && typeof r.text === 'string') {
+        dbg('clip-bg', { ok: true, len: r.text.length });
         if (el && el.focus && !stillFocused(el)) el.focus({ preventScroll: true });
         return r.text.split(CURSOR_MARK).join('');
       }
-    } catch (_) { /* fall back to reading it from the page */ }
-    // Fallback: execCommand('paste') into a hidden textarea. Works with the
-    // clipboardRead permission in both Chrome and Firefox without a page prompt.
-    try {
-      const sel = window.getSelection();
-      const saved = sel && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
-      const ta = document.createElement('textarea');
-      ta.setAttribute('aria-hidden', 'true');
-      ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none';
-      document.documentElement.appendChild(ta);
-      ta.focus({ preventScroll: true });
-      const ok = document.execCommand('paste');
-      text = ok ? ta.value : null;
-      ta.remove();
-      if (el && el.focus) el.focus({ preventScroll: true });
-      if (saved && !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
-        sel.removeAllRanges();
-        sel.addRange(saved);
-      }
-    } catch (_) { /* fall through */ }
-    if (text === null) {
-      try { text = await navigator.clipboard.readText(); } catch (_) { /* ignore */ }
+      dbg('clip-bg', { ok: false, reply: r ? 'null-text' : 'no-reply' });
+    } catch (e) {
+      dbg('clip-bg', { ok: false, err: String((e && e.message) || e).slice(0, 120) });
     }
-    if (text === null) toast('Typexpand: could not read the clipboard');
+    // Fallback 1: read straight from the page context. Does not move focus.
+    try {
+      text = await navigator.clipboard.readText();
+      dbg('clip-page-readText', { ok: true, len: text.length });
+    } catch (e) {
+      dbg('clip-page-readText', { ok: false, err: String((e && e.name) || e) });
+    }
+    // Fallback 2 (last resort): execCommand('paste') into a hidden textarea. It moves
+    // focus, which can close focus-trapped dialogs such as GitHub's search box.
+    if (text === null) {
+      try {
+        const sel = window.getSelection();
+        const saved = sel && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+        const ta = document.createElement('textarea');
+        ta.setAttribute('aria-hidden', 'true');
+        ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none';
+        document.documentElement.appendChild(ta);
+        ta.focus({ preventScroll: true });
+        const ok = document.execCommand('paste');
+        text = ok ? ta.value : null;
+        ta.remove();
+        if (el && el.focus) el.focus({ preventScroll: true });
+        if (saved && !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
+          sel.removeAllRanges();
+          sel.addRange(saved);
+        }
+        dbg('clip-page-paste', { ok, len: text === null ? -1 : text.length });
+      } catch (e) {
+        dbg('clip-page-paste', { ok: false, err: String((e && e.name) || e) });
+      }
+    }
+    if (text === null) toast('Typexpand: could not read the clipboard. Press Alt+Shift+L to copy the debug log.');
     return (text || '').split(CURSOR_MARK).join('');
   }
 
@@ -187,7 +229,7 @@
         newline(el);
       } else {
         fireKey(el, 'keydown', ch);
-        insertChunk(el, ch);
+        if (!insertChunk(el, ch)) insFails++;
         fireKey(el, 'keyup', ch);
       }
       if (settings.typeDelay > 0) await sleep(settings.typeDelay);
@@ -215,10 +257,17 @@
     const before = i < 0 ? text : text.slice(0, i);
     const after = i < 0 ? '' : text.slice(i + 1).split(CURSOR_MARK).join('');
     const full = before + after;
+    const isCtl = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+    const lenBefore = isCtl ? el.value.length : null;
+    insFails = 0;
     let ok = true;
     if (mode === 'paste') insertBlock(el, full);
     else ok = await typeText(el, full);
     if (ok && after) moveCaretBack(el, after);
+    dbg('emit', {
+      mode, expected: full.length, focusKept: ok, insertFails: insFails,
+      valueGrew: isCtl ? el.value.length - lenBefore : 'n/a', el: describe(el)
+    });
   }
 
   /* ---------- trigger detection ---------- */
@@ -249,10 +298,11 @@
     try {
       const mode = sn.mode || settings.mode;
       const text = await teRender(sn.replace, () => readClipboard(el));
-      if (!stillFocused(el)) return;
+      dbg('expand', { viaBuffer, mode, trigLen: sn.trigger.length, textLen: text.length, el: describe(el) });
+      if (!stillFocused(el)) { dbg('expand-abort', { reason: 'focus lost while reading clipboard' }); return; }
       // Re-read: focus juggling may have moved things.
       const ctx = viaBuffer ? bufferCtx(el) : getBefore(el);
-      if (!ctx || !ctx.text.endsWith(sn.trigger)) return;
+      if (!ctx || !ctx.text.endsWith(sn.trigger)) { dbg('expand-abort', { reason: 'trigger no longer before caret' }); return; }
       const len = Array.from(sn.trigger).length;
       if (viaBuffer) {
         if (!ctx.backspace(len)) return;
@@ -265,6 +315,7 @@
       resetBuf();
       await emit(el, text, mode);
     } catch (e) {
+      dbg('expand-error', { err: String((e && e.message) || e).slice(0, 120) });
       console.warn('[Typexpand]', e);
     } finally {
       busy = false;
@@ -316,14 +367,21 @@
   /* ---------- clipboard commands (hotkey / context menu) ---------- */
 
   async function runClipboard(mode) {
-    if (busy) return;
     const el = deepActive();
-    if (!el || !isEditableTarget(el) || el.readOnly || el.disabled) return;
+    const here = document.hasFocus(); // only the frame that has focus reports, to keep the log readable
+    if (busy) { if (here) dbg('skip', { reason: 'busy' }); return; }
+    if (!el || !isEditableTarget(el) || el.readOnly || el.disabled) {
+      if (here) dbg('skip', { reason: 'focused element is not an editable field', active: describe(el) });
+      return;
+    }
+    dbg('hotkey', { mode, el: describe(el) });
     busy = true;
     try {
       const text = await readClipboard(el);
       if (text) await emit(el, text, mode === 'paste' ? 'paste' : 'type');
+      else dbg('skip', { reason: 'clipboard empty or unreadable' });
     } catch (e) {
+      dbg('hotkey-error', { err: String((e && e.message) || e).slice(0, 120) });
       console.warn('[Typexpand]', e);
     } finally {
       busy = false;
@@ -331,6 +389,8 @@
   }
 
   api.runtime.onMessage.addListener((msg) => {
-    if (msg && msg.type === 'clipboard') runClipboard(msg.mode);
+    if (!msg) return;
+    if (msg.type === 'clipboard') runClipboard(msg.mode);
+    else if (msg.type === 'toast') toast(msg.text);
   });
 })();
