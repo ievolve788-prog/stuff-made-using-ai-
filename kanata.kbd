@@ -1,10 +1,21 @@
 (defcfg
   process-unmapped-keys yes
   concurrent-tap-hold yes
+
+  ;; Exclude all XP-Pen / UGTABLET devices from being intercepted
+  linux-dev-names-exclude (
+    "UGTABLET 6 inch PenTablet"
+    "UGTABLET 6 inch PenTablet Keyboard"
+    "UGTABLET 6 inch PenTablet Mouse"
+    "Tablet Mouse2"
+    "XP-Pen Eraser"
+    "XP-Pen Mouse"
+    "XP-Pen Pen"
+  )
 )
 
 (defsrc
-  grv f1 f2 f3 f4 lctl lsft lmet lalt rsft caps spc w e a s d f g z x c v h j k l , u i o pgdn mwu mwd mlft mrgt
+  grv f1 f2 f3 f4 f11 f12 lctl lsft lmet lalt rsft caps spc w e r a s d f g z x c v h j k l , u i o pgdn mwu mwd mlft mrgt
 )
 
 (defvar
@@ -12,6 +23,10 @@
 )
 
 (defalias
+  ;; --- Grave Key: Quick Alt+Tab Switcher ---
+  ;; Tap = Alt+Tab (A-tab), Hold = Normal Grave/Backtick (grv)
+  grv-tab (tap-hold-press 150 200 A-tab grv)
+
   ;; --- Function Row Toolbar ---
   ;; Tap = Copy (C-c), Hold = Normal F1
   f1-copy (tap-hold-press 150 200 C-c f1)
@@ -19,27 +34,27 @@
   f2-paste (tap-hold-press 150 200 C-v f2)
   ;; Tap = Select All (C-a), Hold = Normal F3
   f3-all  (tap-hold-press 150 200 C-a f3)
-  ;; Tap = Alt+Tab (A-tab), Hold = Normal F4
-  f4-tab  (tap-hold-press 150 200 A-tab f4)
 
-  ;; --- Grave Key Dual-Role ---
-  ;; Tap = Right Click (mrgt), Hold = Normal Grave/Backtick (grv)
-  grv-rclick (tap-hold-press 150 200 mrgt grv)
-
-  ;; --- Physical Modifier One-Shot Aliases (Single Tap = OSM) ---
-  os-lctl (one-shot-press-pcancel 2000 lctl)
-  os-lsft (one-shot-press-pcancel 2000 lsft)
-  os-lmet (one-shot-press-pcancel 2000 lmet)
-  os-lalt (one-shot-press-pcancel 2000 lalt)
-  os-rsft (one-shot-press-pcancel 2000 rsft)
+  ;; --- Physical Modifier One-Shot Aliases (1000ms) ---
+  os-lctl (one-shot-press-pcancel 1000 lctl)
+  os-lsft (one-shot-press-pcancel 1000 lsft)
+  os-lmet (one-shot-press-pcancel 1000 lmet)
+  os-lalt (one-shot-press-pcancel 1000 lalt)
+  os-rsft (one-shot-press-pcancel 1000 rsft)
 
   ;; --- Smooth Mouse Wheel Scrolling ---
-  mau (mwheel-up 50 120)
-  mad (mwheel-down 50 120)
+  mau (mwheel-up 80 120)
+  mad (mwheel-down 80 120)
 
   ;; --- Spacebar Action ---
-  ;; Tap = Space, Hold = Mouse / Navigation / Clipboard Layer
+  ;; Tap = Space, Hold = Mouse / Navigation / Editing Layer
   spc-mouse (tap-hold 150 200 spc (layer-toggle mouse))
+
+  ;; --- Toggle Normal / Passthrough Layer ---
+  toggle-passthrough (switch
+    ((base-layer passthrough)) (layer-switch base) break
+    () (layer-switch passthrough) break
+  )
 
   ;; --- Mouse Drag Toggle (Space + G) ---
   toggle-drag (on-press toggle-vkey drag-vk)
@@ -55,21 +70,34 @@
   )
 )
 
-;; Primary Base Layer (36 items)
+;; Primary Base Layer (39 items)
 (deflayer base
-  @grv-rclick @f1-copy @f2-paste @f3-all @f4-tab @os-lctl @os-lsft @os-lmet @os-lalt @os-rsft mlft @spc-mouse w e a s d f g z x c v h j k l , u i o @pgdn-action mwu mwd mlft mrgt
+  @grv-tab @f1-copy @f2-paste @f3-all f4 f11 f12 @os-lctl @os-lsft @os-lmet @os-lalt @os-rsft mlft @spc-mouse w e r a s d f g z x c v h j k l , u i o @pgdn-action mwu mwd mlft mrgt
 )
 
-;; Dedicated Mouse, Navigation & Clipboard Layer (Active ONLY while holding Spacebar) (36 items)
-;; W / E = Scroll Up / Down
-;; A = esc, S = Left Click, D = Right Click, F = ret, G = Toggle Drag
-;; Z = Select All, X = Cut, C = Copy, V = Paste
-;; H / J / K / L = Arrow keys
+;; Dedicated Mouse, Navigation & Text Editing Layer (Active ONLY while holding Spacebar) (39 items)
+;; Grave = plain grv (easy ` and ~)
+;; Caps = Right Click (mrgt)
+;; W / E = Scroll Up / Down | R = Enter
+;; A = esc | S = Left Click | D = Right Click | F = _ | G = Toggle Drag
+;; Z = Undo (C-z) | X = Cut (C-x) | C = Copy (C-c) | V = Paste (C-v)
+;; H / J / K / L = Arrow keys (Left, Down, Up, Right)
+;; U = Home | I = End | O = Backspace | , = Delete
 (deflayer mouse
-  _ _ _ _ _ _ _ _ _ _ _ _ @mau @mad esc mlft mrgt ret @toggle-drag C-a C-x C-c C-v left down up rght _ _ _ _ _ _ _ _ _
+  grv _ _ _ _ _ _ _ _ _ _ _ mrgt _ @mau @mad ret esc mlft mrgt _ @toggle-drag C-z C-x C-c C-v left down up rght del home end bspc _ _ _ _ _
+)
+
+;; 100% Normal Keyboard Layer (Zero Kanata Remappings / Pure Passthrough) (39 items)
+(deflayer passthrough
+  grv f1 f2 f3 f4 f11 f12 lctl lsft lmet lalt rsft caps spc w e r a s d f g z x c v h j k l , u i o pgdn mwu mwd mlft mrgt
 )
 
 (defvirtualkeys
   pgdn-vk pgdn
   drag-vk mlft
+)
+
+(defchordsv2
+  ;; Press F11 + F12 simultaneously to toggle Normal Passthrough Mode ON/OFF
+  (f11 f12) @toggle-passthrough 200 first-release ()
 )
